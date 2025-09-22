@@ -4,7 +4,7 @@
 """
 from prefect import flow, task, get_run_logger
 from prefect.context import get_run_context
-# from prefect_shell import ShellOperation
+from prefect_shell import ShellOperation
 from datetime import datetime, timedelta
 import pandas as pd
 import os
