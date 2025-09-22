@@ -47,7 +47,7 @@ SOURCE_LOADER_REGISTRY: Dict[str, Callable] = {
 
 @task
 def process_features_for_single_day(
-    target_date_str: str,
+    target_date_str: str = "2019-01-15",
     feature_groups_to_process: Optional[List[str]] = None,
     spark: Optional[SparkSession] = None 
 ):
@@ -108,16 +108,29 @@ def process_features_for_single_day(
             spark.stop()
 
 
+from prefect import task, get_run_logger
+from prefect_shell import ShellOperation
+
 @task
 def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
     logger = get_run_logger()
-    logger.info(f"Before Running Feast materialization command: {command}")
-    if not target_date: return
+    logger.info("starting materialization..")
+    
+    # 好的实践：为提前退出的情况也添加日志
+    if not target_date:
+        logger.info("target_date is empty, skipping materialization.")
+        return
+
+    # 1. 首先定义 command 变量
     command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
+    
+    # 2. 然后再记录它
     logger.info(f"Running Feast materialization command: {command}")
+    
+    # 3. 执行命令，并实时流式传输输出
     ShellOperation(
         commands=[command],
-        stream_output=True  # <-- 关键参数
+        stream_output=True
     ).run()
 
 @flow
