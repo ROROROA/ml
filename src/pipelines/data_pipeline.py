@@ -143,7 +143,7 @@ def simple_test_task():
 def data_pipeline_flow(target_date: Optional[str] = None):
     target_date_str = target_date or (datetime.now() - timedelta(days=50)).strftime('%Y-%m-%d')
     
-    # processed_task = process_features_for_single_day.submit(target_date_str)
+    processed_task = process_features_for_single_day.submit(target_date_str)
     
     # 在崩溃的任务之前，先调用这个简单的测试任务
     # test_task_future = simple_test_task.submit(wait_for=[processed_task])
