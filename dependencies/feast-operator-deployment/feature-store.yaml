@@ -8,3 +8,128 @@ spec:
   feastProject: feast_demo
   services:
     ui: {} # 只需要一个空对象，Operator 就会使用默认值创建 UI Deployment
+    registry:
+      local:
+        persistence:
+          file:
+            path: s3://feast/registry.db
+            s3_additional_kwargs:
+              endpoint_url: "http://minio.default.svc.cluster.local:9000"
+              aws_access_key_id: "pe5SRJXlhRnxqAX6sVnw"
+              aws_secret_access_key: "LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63"
+
+
+# set AWS_ACCESS_KEY_ID=pe5SRJXlhRnxqAX6sVnw
+# set AWS_SECRET_ACCESS_KEY=LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63
+# set FEAST_S3_ENDPOINT_URL=http://minio.default.svc.cluster.local:9000
+  # path: s3://feast/registry.db  # "feast" 是你的 bucket 名称, "registry.db" 是文件路径
+
+
+# services:
+#   # --------------------------------------------------------------------------
+#   # 1. Registry (注册中心)
+#   #    这是 Feast 的“大脑”，存储所有特征定义（元数据）。
+#   #    这里我们配置一个本地的 Registry 服务，并使用 PVC (持久卷) 来存储 registry.pb 文件。
+#   # --------------------------------------------------------------------------
+# ServerSideEncryption: AES256
+#               ACL: bucket-owner-full-control
+#               CacheControl: max-age=3600ServerSideEncryption: AES256
+#               ACL: bucket-owner-full-control
+#               CacheControl: max-age=3600
+#   registry:
+#     local:
+#       # Registry 服务的 Pod 配置
+#       server:
+#         image: "gcr.io/kf-feast/feast-registry-server:0.35.0" # <-- 通常与你的 Feast 版本匹配
+#         resources:
+#           requests:
+#             cpu: "100m"
+#             memory: "256Mi"
+#           limits:
+#             cpu: "200m"
+#             memory: "512Mi"
+#         # 默认启用 gRPC 服务，这是 SDK 连接所必需的
+#         grpc: true
+#       # Registry 数据的持久化配置
+#       persistence:
+#         file:
+#           # registry.pb 文件在容器内的挂载路径
+#           path: "/etc/feast/registry"
+#           # 使用 Persistent Volume Claim (PVC) 来持久化存储
+#           pvc:
+#             # 创建一个新的 PVC 来存储数据
+#             create:
+#               # 访问模式，ReadWriteOnce 对大多数场景都适用
+#               accessModes: ["ReadWriteOnce"]
+#               # 存储类名称，你需要将其替换为你的 K8s 集群中可用的 StorageClass
+#               # 例如： "standard", "gp2", "nfs-client" 等
+#               storageClassName: "your-storage-class-name" # <--- 【请修改】
+#               resources:
+#                 requests:
+#                   storage: "1Gi" # 为 Registry 分配 1GB 的存储空间
+
+#   # --------------------------------------------------------------------------
+#   # 2. Online Store (在线存储)
+#   #    提供低延迟的特征服务，用于在线预测。
+#   #    这里我们配置它连接到一个外部的 Redis 实例。
+#   # --------------------------------------------------------------------------
+#   onlineStore:
+#     # Feature Server 服务的 Pod 配置
+#     server:
+#       image: "gcr.io/kf-feast/feast-feature-server:0.35.0" # <-- 通常与你的 Feast 版本匹配
+#       resources:
+#         requests:
+#           cpu: "200m"
+#           memory: "512Mi"
+#         limits:
+#           cpu: "500m"
+#           memory: "1Gi"
+#     # 在线存储的持久化/连接配置
+#     persistence:
+#       store:
+#         # 在线存储的类型
+#         type: "redis"
+#         # 引用一个包含 Redis 连接信息的 Kubernetes Secret
+#         secretRef:
+#           name: "redis-connection-secret" # <--- 【请修改】你需要预先创建这个 Secret
+
+#   # --------------------------------------------------------------------------
+#   # 3. Offline Store (离线存储)
+#   #    用于存储历史特征数据，主要用于模型训练和分析。
+#   #    这里我们配置它连接到一个外部的 Snowflake 数据仓库。
+#   # --------------------------------------------------------------------------
+#   offlineStore:
+#     # （可选）如果你需要一个服务来代理离线存储的查询，可以配置 server
+#     # 对于很多场景（如直接在 Spark 中使用 Feast SDK），这个 server 不是必需的
+#     server:
+#       image: "gcr.io/kf-feast/feast-offline-server:0.35.0" # <-- 通常与你的 Feast 版本匹配
+#       resources:
+#         requests:
+#           cpu: "100m"
+#           memory: "256Mi"
+#         limits:
+#           cpu: "200m"
+#           memory: "512Mi"
+#     # 离线存储的连接配置
+#     persistence:
+#       store:
+#         # 离线存储的类型 (可以是 snowflake, bigquery, redshift, file 等)
+#         type: "snowflake"
+#         # 引用一个包含 Snowflake 连接信息的 Kubernetes Secret
+#         secretRef:
+#           name: "snowflake-connection-secret" # <--- 【请修改】你需要预先创建这个 Secret
+
+#   # --------------------------------------------------------------------------
+#   # 4. UI (用户界面)
+#   #    提供一个可视化的界面来浏览特征仓库中的实体、特征视图等。
+#   # --------------------------------------------------------------------------
+#   ui:
+#     # UI 服务的 Pod 配置
+#     image: "gcr.io/kf-feast/feast-ui:0.35.0" # <-- 通常与你的 Feast 版本匹配
+#     resources:
+#       requests:
+#         cpu: "100m"
+#         memory: "128Mi"
+#       limits:
+#         cpu: "200m"
+#         memory: "256Mi"

@@ -108,28 +108,7 @@ def process_features_for_single_day(
             spark.stop()
 
 
-# @task
-# def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
-#     print("print materialize_features_to_online_store")
-#     logger = get_run_logger()
-#     logger.info("starting materialization..")
-    
-#     # 好的实践：为提前退出的情况也添加日志
-#     if not target_date:
-#         logger.info("target_date is empty, skipping materialization.")
-#         return
 
-#     # 1. 首先定义 command 变量
-#     command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
-    
-#     # 2. 然后再记录它
-#     logger.info(f"Running Feast materialization command: {command}")
-    
-#     # 3. 执行命令，并实时流式传输输出
-#     ShellOperation(
-#         commands=[command],
-#         stream_output=True
-#     ).run()
 
 @task
 def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):

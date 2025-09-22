@@ -1,0 +1,71 @@
+# Feast 特征仓库的核心配置文件
+# 定义了项目的元数据、数据源和提供者
+project: movielens_recommendations
+registry:
+  path: s3://feast/registry.db  # "feast" 是你的 bucket 名称, "registry.db" 是文件路径
+provider: local  # 我们在本地环境中运行
+
+# 离线存储配置：告诉 Feast 去哪里查找用于训练和回填的历史数据
+# offline_store:
+#     type: hive
+#     host: your-hive-thrift-server.your-namespace.svc.cluster.local # !!重要!!: 请替换为你的 Hive Thrift Server 的 K8s 服务地址
+#     port: 10000
+#     database: feature_store # 我们写入特征的目标数据库 minio.default.svc.cluster.local
+# set AWS_ACCESS_KEY_ID=pe5SRJXlhRnxqAX6sVnw
+# set AWS_SECRET_ACCESS_KEY=LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63
+# set FEAST_S3_ENDPOINT_URL=http://minio.default.svc.cluster.local:9000
+
+
+offline_store:
+    type: spark
+    spark_conf:
+      spark.master: "k8s://https://kubernetes.docker.internal:6443"
+      spark.driver.host: "198.18.0.1"
+      spark.driver.bindAddress: "0.0.0.0"
+      spark.driver.extraClassPath: "C:\\Users\\30630\\.ivy2.5.2\\jars\\*"
+      # --- Kubernetes 相关配置 ---
+      spark.kubernetes.container.image: "my-spark-jupyter:latest"
+      spark.kubernetes.authenticate.driver.serviceAccountName: "spark-operator-spark"
+      spark.kubernetes.namespace: "default"
+      spark.kubernetes.file.upload.path: "s3a://spark-warehouse/spark-uploads"
+
+      # --- 依赖和卷挂载配置 (JARs) ---
+      # 注意：Feast 会在运行时提交自己的 Spark 作业，而不是你的 connect_server.py
+      # 确保 my-spark-jupyter:latest 镜像中包含了 S3 和 PostgreSQL 的 JAR 包是最佳实践
+      spark.driver.extraJavaOptions: "-Dkubernetes.trust.certificates=true"
+      spark.driver.extraClassPath: "/opt/spark/jars-extra/*"
+      spark.executor.extraClassPath: "/opt/spark/jars-extra/*"
+      spark.kubernetes.driver.volumes.hostPath.shared-jars.mount.path: "/opt/spark/jars-extra"
+      spark.kubernetes.driver.volumes.hostPath.shared-jars.options.path: "/opt/spark/jars"
+      spark.kubernetes.executor.volumes.hostPath.shared-jars.mount.path: "/opt/spark/jars-extra"
+      spark.kubernetes.executor.volumes.hostPath.shared-jars.options.path: "/opt/spark/jars"
+
+      # --- S3 (MinIO) 连接配置 ---
+      spark.hadoop.fs.s3a.endpoint: "http://minio.default.svc.cluster.local:9000"
+      spark.hadoop.fs.s3a.access.key: "cXFVWCBKY6xlUVjuc8Qk"
+      spark.hadoop.fs.s3a.secret.key: "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
+      spark.hadoop.fs.s3a.path.style.access: "true"
+
+      # --- Hive Metastore (PostgreSQL backend) 配置 ---
+      spark.sql.catalogImplementation: "hive"
+      spark.sql.warehouse.dir: "s3a://spark-warehouse/"
+      spark.hadoop.javax.jdo.option.ConnectionDriverName: "org.postgresql.Driver"
+      spark.hadoop.javax.jdo.option.ConnectionURL: "jdbc:postgresql://mlflow-postgres-postgresql.default.svc.cluster.local:5432/spark"
+      spark.hadoop.javax.jdo.option.ConnectionUserName: "mlflow_user"
+      spark.hadoop.javax.jdo.option.ConnectionPassword: "mlflow_password"
+      spark.hadoop.datanucleus.autoCreateSchema: "true"
+      spark.hadoop.datanucleus.autoCreateTables: "true"
+      spark.hadoop.datanucleus.fixedDatastore: "false"
+      spark.hadoop.hive.metastore.schema.verification: "false"
+
+
+
+        
+
+
+
+online_store:
+  type: redis
+  connection_string: my-redis-master.default.svc.cluster.local:6379,password=ZiiTcOq5jT
+
+

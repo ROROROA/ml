@@ -50,8 +50,8 @@ start /B  kubectl port-forward svc/minio-console 9001:9001 -n default
 @REM submit_connect_server.bat
 
 
-
-
+@REM kubectl port-forward --namespace default svc/my-redis-master 6379:6379
+@REM redis password: ZiiTcOq5jT
 
 
 
