@@ -9,6 +9,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip install "prefect[github]"
 RUN apt-get update && apt-get install -y git && rm -rf /var/lib/apt/lists/*
 RUN pip install prefect-shell
-RUN pip install prefect[spark]
+RUN pip install grpcio==1.71.0 
+RUN pip install grpcio-status==1.71.0 
 
 

@@ -16,5 +16,9 @@ pyarrow==17.0.0
 xgboost==3.0.5
 pyspark==4.0.0
 
+prefect-shell==0.3.1
+prefect-kubernetes==0.6.4
+prefect-github==0.3.1
+
 # 数据库与连接
 sqlalchemy==2.0.43

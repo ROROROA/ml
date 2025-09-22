@@ -55,9 +55,10 @@ def process_features_for_single_day(
     【核心执行器 (Executor)】
     为给定的一天，调度并计算一个或多个特征组。
     """
-    import logging
-    logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
-    logger = logging.getLogger(__name__)
+    # import logging
+    # logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+    # logger = logging.getLogger(__name__)
+    logger = get_run_logger()
 
     logger.info(f"Feature processing executor started for date: {target_date_str}")
     
@@ -110,10 +111,14 @@ def process_features_for_single_day(
 @task
 def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
     logger = get_run_logger()
+    logger.info(f"Before Running Feast materialization command: {command}")
     if not target_date: return
     command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
     logger.info(f"Running Feast materialization command: {command}")
-    ShellOperation(commands=[command]).run()
+    ShellOperation(
+        commands=[command],
+        stream_output=True  # <-- 关键参数
+    ).run()
 
 @flow
 def data_pipeline_flow(target_date: Optional[str] = None):
