@@ -11,7 +11,7 @@
 # 设置 Prefect 连接配置（根据部署偏好，优先确保核心组件配置正确）
 if [ -z "$PREFECT_API_URL" ]; then
     echo "🔧 Setting default PREFECT_API_URL for local development..."
-    export PREFECT_API_URL="http://localhost:4200/api"
+    export PREFECT_API_URL="http://localhost:30200/api"
 fi
 
 # 自托管模式不需要 API_KEY，设置为空

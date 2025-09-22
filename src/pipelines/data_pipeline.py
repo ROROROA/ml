@@ -19,9 +19,16 @@ from src.etl.data_loaders import load_spine, load_ratings
 from feature_repo.feature_views import user_rolling_features_source
 
 
+# def get_spark_session() -> SparkSession:
+#     """获取或创建一个 SparkSession。在生产环境中由 Prefect Worker 调用。"""
+#     return SparkSession.builder.appName("FeatureETL-MovieLens").enableHiveSupport().getOrCreate()
+
+
 def get_spark_session() -> SparkSession:
-    """获取或创建一个 SparkSession。在生产环境中由 Prefect Worker 调用。"""
-    return SparkSession.builder.appName("FeatureETL-MovieLens").enableHiveSupport().getOrCreate()
+    """获取或创建一个 SparkSession。"""
+    # return SparkSession.builder.appName("FeatureETL-MovieLens").enableHiveSupport().getOrCreate()
+    return SparkSession.builder.appName("FeatureETL-MovieLens").remote("sc://spark-connect-external-service:15002").getOrCreate()
+    # return SparkSession.builder.remote("sc://localhost:31002").getOrCreate()
 
 # --- 1. 定义特征计算的注册表 (Feature Registry) ---
 FEATURE_REGISTRY: Dict[str, Dict] = {

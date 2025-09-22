@@ -1,0 +1,31 @@
+---
+# 在 'default' 命名空间中创建一个 Role，允许创建和管理 Jobs 和 Pods
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: prefect-worker-job-creator
+  namespace: default
+rules:
+- apiGroups: ["batch"]
+  resources: ["jobs"]
+  verbs: ["create", "get", "list", "watch", "patch", "delete"]
+- apiGroups: [""] # "" 表示核心 API 组
+  resources: ["pods", "pods/log"]
+  verbs: ["get", "list", "watch", "delete"]
+
+---
+# 创建一个 RoleBinding，将上面的 Role 权限
+# 授予 'prefect' 命名空间中的 'prefect-worker' ServiceAccount
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: prefect-worker-job-binding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: prefect-worker      # 这是你的 Prefect Worker 使用的 ServiceAccount
+  namespace: prefect       # ServiceAccount 所在的命名空间
+roleRef:
+  kind: Role
+  name: prefect-worker-job-creator  # 绑定到我们上面创建的 Role
+  apiGroup: rbac.authorization.k8s.io

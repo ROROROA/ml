@@ -4,6 +4,9 @@ helm repo update
 helm upgrade --install prefect-server prefect/prefect-server --values prefect-server-values.yaml 
 helm upgrade --install prefect-worker prefect/prefect-worker --values prefect-worker-values-simple.yaml 
 
+kubectl apply -f prefect-rbac.yaml
+prefect block register -m prefect_github
+
 #!/bin/bash
 
 # Prefect 自托管部署脚本

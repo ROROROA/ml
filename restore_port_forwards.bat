@@ -44,9 +44,11 @@ start /B  kubectl port-forward svc/minio-console 9001:9001 -n default
 @REM 127.0.0.1 minio.default.svc.cluster.local
 @REM 127.0.0.1 mlflow-postgres-postgresql.default.svc.cluster.local
 
+#Run
 @REM kubectl port-forward svc/minio 9000:9000 -n default
 @REM kubectl port-forward svc/mlflow-postgres-postgresql 5432:5432 -n default
 @REM submit_connect_server.bat
+
 
 
 
@@ -72,10 +74,3 @@ echo 🔍 最终端口转发状态:
 powershell -ExecutionPolicy Bypass -File list_port_forwards.ps1
 
 pause
-
-echo 4️⃣ 启动 Spark (端口 7077)...
-start /B kubectl port-forward svc/my-spark-cluster-master-svc 7077:7077 
-start /B kubectl port-forward svc/my-spark-cluster-master-svc 8080:80 
-
-start /B  kubectl port-forward svc/minio 9000:9000 -n default
-start /B  kubectl port-forward svc/mlflow-postgres-postgresql 5432:5432
