@@ -108,28 +108,60 @@ def process_features_for_single_day(
             spark.stop()
 
 
+# @task
+# def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
+#     print("print materialize_features_to_online_store")
+#     logger = get_run_logger()
+#     logger.info("starting materialization..")
+    
+#     # 好的实践：为提前退出的情况也添加日志
+#     if not target_date:
+#         logger.info("target_date is empty, skipping materialization.")
+#         return
+
+#     # 1. 首先定义 command 变量
+#     command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
+    
+#     # 2. 然后再记录它
+#     logger.info(f"Running Feast materialization command: {command}")
+    
+#     # 3. 执行命令，并实时流式传输输出
+#     ShellOperation(
+#         commands=[command],
+#         stream_output=True
+#     ).run()
+
 @task
 def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
-    print("print materialize_features_to_online_store")
     logger = get_run_logger()
-    logger.info("starting materialization..")
-    
-    # 好的实践：为提前退出的情况也添加日志
-    if not target_date:
-        logger.info("target_date is empty, skipping materialization.")
-        return
+    logger.info("--- Starting Debug Session for materialize_features_to_online_store ---")
 
-    # 1. 首先定义 command 变量
-    command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
+    # ------------------- 诊断步骤开始 -------------------
+    ShellOperation(
+        commands=[
+            "echo '--- [DEBUG] Checking Current Working Directory ---'",
+            "pwd",
+            "echo '--- [DEBUG] Listing contents of Current Directory (CWD) ---'",
+            "ls -la",
+            "echo '--- [DEBUG] Listing contents of expected feature_repo directory ---'",
+            "ls -la feature_repo",
+            "echo '--- [DEBUG] Trying to show the content of feature_store.yaml ---'",
+            "cat feature_repo/feature_store.yaml"
+        ],
+        stream_output=True
+    ).run()
+    # ------------------- 诊断步骤结束 -------------------
     
-    # 2. 然后再记录它
+    logger.info("--- Debug session finished. Now attempting to run Feast. ---")
+
+    command = f"feast -c {feast_repo_path} materialize-incremental {target_date}"
     logger.info(f"Running Feast materialization command: {command}")
     
-    # 3. 执行命令，并实时流式传输输出
     ShellOperation(
         commands=[command],
         stream_output=True
     ).run()
+
 @flow
 def data_pipeline_flow(target_date: Optional[str] = None):
     target_date_str = target_date or (datetime.now() - timedelta(days=50)).strftime('%Y-%m-%d')
