@@ -1,0 +1,26 @@
+# spark-connect-nodeport-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-connect-external-service
+  namespace: default
+spec:
+  type: NodePort
+  # 使用能稳定选中 Spark Connect Driver Pod 的标签
+  selector:
+    spark-app-name: spark-connect-server
+    spark-role: driver
+  ports:
+    # --- 端口 1: 暴露 Spark Connect Server (给客户端连接) ---
+    - name: connect-port
+      protocol: TCP
+      port: 15002          # Service 在集群内部的端口
+      targetPort: 15002      # Spark Connect Pod 实际监听的端口
+      nodePort: 31002     # 在外部暴露的固定端口 (确保未被使用)
+
+    # --- 端口 2: 暴露 Spark UI (给浏览器访问) ---
+    - name: ui-port
+      protocol: TCP
+      port: 4040          # Service 在集群内部的端口
+      targetPort: 4040      # Spark Driver UI Pod 实际监听的端口
+      nodePort: 30041     # 在外部暴露的固定端口 (确保未被使用)

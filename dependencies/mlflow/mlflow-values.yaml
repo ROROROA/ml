@@ -1,0 +1,9 @@
+# mlflow-values.yaml
+
+# 数据库存储配置
+backendStore:
+  defaultSqlitePath: ":memory:"
+
+# 默认存储路径
+artifactRoot:
+  defaultArtifactRoot: "./mlruns"

@@ -1,0 +1,10 @@
+# feature-store.yaml
+apiVersion: feast.dev/v1alpha1
+kind: FeatureStore
+metadata:
+  name: feast-demo
+  namespace: default
+spec:
+  feastProject: feast_demo
+  services:
+    ui: {} # 只需要一个空对象，Operator 就会使用默认值创建 UI Deployment

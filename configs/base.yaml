@@ -1,0 +1,18 @@
+# configs/base.yaml
+# 基础配置文件，用于定义路径、项目名称等不常变动的全局变量
+
+project_name: "your_model_service"
+
+# MLflow & Feast 中的实体名称
+feast_entity: "user_id"
+
+# Hive 中表的路径或名称
+data_paths:
+  raw_data_table: "raw_events"
+  precomputed_features_table: "user_features_precomputed"
+  training_dataset_table: "training_ds_for_model_v1" # Feast point-in-time join 的输出表
+
+# 模型产出物配置
+mlflow:
+  experiment_name: "/experiments/your_model_service"
+  registered_model_name: "YourModelServiceName"

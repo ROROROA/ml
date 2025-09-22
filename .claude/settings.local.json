@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(kubectl exec:*)",
+      "Bash(kubectl port-forward:*)",
+      "Bash(kubectl get svc:*)",
+      "Bash(curl:*)",
+      "Bash(kubectl logs:*)",
+      "Bash(kubectl cp:*)",
+      "Bash(kubectl get secrets:*)",
+      "Bash(kubectl get secret:*)",
+      "Bash(kubectl get pods:*)",
+      "Bash(kubectl describe pod:*)",
+      "Bash(kubectl get pod:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

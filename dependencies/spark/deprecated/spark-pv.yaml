@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: PersistentVolume
+metadata:
+  name: spark-data-pv # 给一个新名字
+spec:
+  storageClassName: hostpath
+  capacity:
+    storage: 1Gi # 可以根据需要调整大小
+  accessModes:
+    - ReadWriteMany # <--- 这是关键的修复！
+  hostPath:
+    # ！！！注意：请将这里的路径修改为你 Windows 机器上
+    # 存放 ml-25m 数据的真实父目录路径！！！
+    path: "/c/Users/30630/ml"

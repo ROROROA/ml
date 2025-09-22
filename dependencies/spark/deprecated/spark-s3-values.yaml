@@ -1,0 +1,61 @@
+image:
+  pullPolicy: IfNotPresent
+
+master:
+
+  containerSecurityContext:
+    readOnlyRootFilesystem: false # 将只读文件系统关闭
+
+  extraVolumes:
+    - name: spark-s3-config-vol
+      configMap:
+        name: spark-s3-config
+  extraVolumeMounts:
+    - name: spark-s3-config-vol
+      mountPath: /opt/bitnami/spark/conf/spark-defaults.conf
+      subPath: spark-defaults.conf
+
+  # --- 新增或修改这部分 ---
+  service:
+    type: NodePort
+    # K8s 会在 30000-32767 范围内自动分配一个端口。
+    # 你也可以在这里手动指定一个，例如：
+    # nodePort: 30777
+
+
+# 为 Worker Pods 配置完全相同的 Volume 和 Volume Mount
+worker:
+  containerSecurityContext:
+    readOnlyRootFilesystem: false # 将只读文件系统关闭
+  extraVolumes:
+    - name: spark-s3-config-vol
+      configMap:
+        name: spark-s3-config
+        
+  extraVolumeMounts:
+    - name: spark-s3-config-vol
+      mountPath: /opt/bitnami/spark/conf/spark-defaults.conf
+      subPath: spark-defaults.conf
+
+
+common:
+  initContainers:
+    - name: init-spark-jars
+      image: maven:3.8-openjdk-11
+      command:
+        - /bin/bash
+        - -c
+        - |
+          echo "Downloading Spark S3A dependencies..."
+          mvn dependency:get -Dartifact=org.apache.hadoop:hadoop-aws:3.4.1 -Dtransitive=true
+          mvn dependency:copy-dependencies -DoutputDirectory=/spark-jars
+      volumeMounts:
+        - name: spark-jars
+          mountPath: /spark-jars
+  extraVolumes:
+    - name: spark-jars
+      emptyDir: {}
+  extraVolumeMounts:
+    - name: spark-jars
+      mountPath: /spark-jars
+

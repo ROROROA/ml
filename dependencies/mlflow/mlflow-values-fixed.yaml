@@ -1,0 +1,49 @@
+# mlflow-values-fixed.yaml
+# 修复 MLflow PostgreSQL 部署的健康检查问题
+
+# 1. PostgreSQL 后端存储配置
+backendStore:
+  postgres:
+    enabled: true
+    host: "mlflow-postgres-postgresql"
+    port: 5432
+    database: "mlflow_db"
+    user: "mlflow_user"
+    password: "mlflow_password"
+
+# 2. 禁用内置 PostgreSQL
+postgresql:
+  enabled: false
+
+# 3. 增加资源限制以避免 OOM
+resources:
+  requests:
+    cpu: 200m
+    memory: 512Mi
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+
+# 4. 修复健康检查配置 - 使用根路径而不是 /health
+livenessProbe:
+  httpGet:
+    path: /
+    port: mlflow
+  initialDelaySeconds: 30
+  periodSeconds: 30
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+readinessProbe:
+  httpGet:
+    path: /
+    port: mlflow  
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 10
+  failureThreshold: 5
+
+# 5. 保持轻量化的 artifact 存储
+artifactRoot:
+  defaultArtifactRoot: "./mlruns"
+

@@ -1,0 +1,22 @@
+# mlflow-nodeport-service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  # 给它一个独立的名字，避免和 Helm 创建的冲突
+  name: mlflow-external-service
+  # 确保和你的 MLflow 部署在同一个命名空间
+  namespace: default
+spec:
+  # 服务类型为 NodePort
+  type: NodePort
+  ports:
+    - port: 5000          # 这个服务在集群内部的端口
+      targetPort: 5000      # 目标 Pod 上的端口
+      nodePort: 30500     # 你想要在外部暴露的固定端口
+      protocol: TCP
+      name: http
+  # !!! 关键部分 !!!
+  # 使用从 kubectl 命令中查到的准确标签
+  selector:
+    app.kubernetes.io/instance: mlflow
+    app.kubernetes.io/name: mlflow

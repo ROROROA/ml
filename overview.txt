@@ -1,0 +1,597 @@
+1. 创建项目目录结构
+首先，创建如下的文件夹结构：
+your_model_service/
+├── configs/
+├── feature_repo/
+└── src/
+    ├── pipelines/
+    └── training/
+2. 创建文件并复制代码
+接下来，在对应的目录下创建以下文件，并将代码内容复制进去。
+根目录文件
+pyproject.toml
+# pyproject.toml
+# 使用 Poetry 或其他现代 Python 包管理工具
+# 定义项目的元数据和依赖
+
+[tool.poetry]
+name = "your_model_service"
+version = "0.1.0"
+description = "A standardized MLOps project template for a new model service."
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+# MLOps 核心组件
+prefect = "^2.10"
+mlflow = "^2.3"
+feast = {extras = ["hive"], version = "^0.32.1"} # 根据你的在线/离线库选择 extras
+ray = {extras = ["data", "train", "air"], version = "^2.5"}
+
+# 模型与数据处理
+torch = "^1.13"
+scikit-learn = "^1.2"
+pandas = "^1.5"
+pyarrow = "^11.0"
+
+# 数据库与连接
+pyhive = {extras = ["hive"], version = "^0.7.0"}
+sqlalchemy = "<2.0" # Feast hive connector 依赖
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
+.env.template
+# .env.template
+# 模板环境变量，实际部署时应复制为 .env 文件并填充真实值
+# 在 OpenShift 中，这些值通常通过 Secrets 或 ConfigMaps 注入
+
+# Prefect 配置
+PREFECT_API_URL="http://your-prefect-server/api"
+PREFECT_API_KEY="your-prefect-api-key"
+
+# MLflow 配置
+MLFLOW_TRACKING_URI="http://your-mlflow-server:5000"
+MLFLOW_S3_ENDPOINT_URL="http://your-s3-endpoint-for-artifacts" # e.g., MinIO
+
+# Feast/Hive 配置
+FEAST_OFFLINE_STORE_TYPE="hive"
+HIVE_SERVER_HOST="your-hive-server2-host"
+HIVE_SERVER_PORT="10000"
+HIVE_DATABASE="default"
+
+# AWS/S3 配置 (用于 MLflow Artifacts 和可能的 Ray 数据)
+AWS_ACCESS_KEY_ID="your-access-key"
+AWS_SECRET_ACCESS_KEY="your-secret-key"
+Dockerfile
+# Dockerfile for training and deployment
+# 使用多阶段构建来减小最终镜像的大小
+
+# --- Builder Stage ---
+FROM python:3.9-slim as builder
+
+# 设置工作目录
+WORKDIR /app
+
+# 安装 Poetry
+RUN pip install poetry
+
+# 复制依赖定义文件
+COPY pyproject.toml poetry.lock ./
+
+# 安装项目依赖 (只安装，不创建 venv)
+RUN poetry config virtualenvs.create false && \
+    poetry install --no-root --no-dev
+
+# --- Final Stage ---
+FROM python:3.9-slim
+
+# 设置工作目录
+WORKDIR /app
+
+# 从 builder 阶段复制已安装的依赖
+COPY --from=builder /usr/local/lib/python3.9/site-packages /usr/local/lib/python3.9/site-packages
+
+# 复制项目源代码
+COPY ./src ./src
+COPY ./configs ./configs
+COPY ./feature_repo ./feature_repo
+
+# 设置 Python 路径，让解释器能找到我们的模块
+ENV PYTHONPATH="/app"
+
+# 默认入口点（可以被 Prefect 或其他命令覆盖）
+CMD ["bash"]
+configs/ 目录
+configs/base.yaml
+# configs/base.yaml
+# 基础配置文件，用于定义路径、项目名称等不常变动的全局变量
+
+project_name: "your_model_service"
+
+# MLflow & Feast 中的实体名称
+feast_entity: "user_id"
+
+# Hive 中表的路径或名称
+data_paths:
+  raw_data_table: "raw_events"
+  precomputed_features_table: "user_features_precomputed"
+  training_dataset_table: "training_ds_for_model_v1" # Feast point-in-time join 的输出表
+
+# 模型产出物配置
+mlflow:
+  experiment_name: "/experiments/your_model_service"
+  registered_model_name: "YourModelServiceName"
+configs/model_params.yaml
+# configs/model_params.yaml
+# 模型超参数，方便调优和实验跟踪
+
+# Ray Trainer 的配置
+scaling_config:
+  num_workers: 4
+  use_gpu: True
+
+# 训练循环中的配置
+training_loop:
+  lr: 0.001
+  epochs: 10
+  batch_size: 256
+
+# 模型架构的配置
+model_architecture:
+  embedding_dim: 16
+  hidden_layers: [128, 64]
+  dropout: 0.3
+feature_repo/ 目录
+feature_repo/entities.py
+# feature_repo/entities.py
+from feast import Entity
+
+# 定义模型服务的核心实体，例如用户
+user = Entity(
+    name="user_id",
+    description="The ID of the user",
+)
+feature_repo/feature_views.py
+# feature_repo/feature_views.py
+from datetime import timedelta
+from feast import FeatureView, Field
+from feast.infra.hive.hive_source import HiveSource
+from feast.types import Float32, Int64, String
+
+from feature_repo.entities import user # 导入实体
+
+# 离线特征视图：从 Spark ETL 计算出的 Hive 表中读取
+# 这些特征变化较慢，可以天级/小时级更新
+offline_features_source = HiveSource(
+    table="user_features_precomputed", # 对应 configs/base.yaml
+    event_timestamp_column="event_timestamp",
+    created_timestamp_column="created_timestamp",
+)
+
+user_offline_fv = FeatureView(
+    name="user_offline_features",
+    entities=[user],
+    ttl=timedelta(days=7),
+    schema=[
+        Field(name="total_orders_7d", dtype=Float32),
+        Field(name="avg_purchase_value_30d", dtype=Float32),
+        Field(name="last_seen_platform", dtype=String),
+    ],
+    online=True, # 表明这些特征需要被物化到在线商店
+    source=offline_features_source,
+    tags={"team": "recommendation"},
+)
+
+# 实时特征视图示例 (假设有一个实时特征表)
+# 注意：实时特征的计算通常由另一个流式处理作业完成
+realtime_features_source = HiveSource(
+    table="user_realtime_features",
+    event_timestamp_column="event_timestamp",
+)
+
+user_realtime_fv = FeatureView(
+    name="user_realtime_features",
+    entities=[user],
+    ttl=timedelta(minutes=30),
+    schema=[
+        Field(name="current_page_views_10m", dtype=Int64),
+    ],
+    online=True,
+    source=realtime_features_source,
+    tags={"team": "recommendation"},
+)
+src/training/ 目录
+src/training/preprocess.py
+# src/training/preprocess.py
+from typing import Dict, List
+import pandas as pd
+
+from ray.data.preprocessor import Preprocessor
+from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.compose import ColumnTransformer
+
+class CustomPreprocessor(Preprocessor):
+    """
+    一个自定义的 Ray Preprocessor 示例。
+    它封装了 scikit-learn 的 ColumnTransformer，用于处理混合数据类型。
+    """
+
+    def __init__(self, numeric_columns: List[str], categorical_columns: List[str]):
+        self.numeric_columns = numeric_columns
+        self.categorical_columns = categorical_columns
+        self.transformer = None
+
+    def _fit(self, dataset: pd.DataFrame) -> Preprocessor:
+        # 定义如何处理数值和类别特征
+        numeric_transformer = StandardScaler()
+        categorical_transformer = OneHotEncoder(handle_unknown='ignore')
+
+        # 使用 ColumnTransformer 来组合这些步骤
+        self.transformer = ColumnTransformer(
+            transformers=[
+                ('num', numeric_transformer, self.numeric_columns),
+                ('cat', categorical_transformer, self.categorical_columns)
+            ],
+            remainder='passthrough' # 保留其他列
+        )
+        
+        self.transformer.fit(dataset)
+        return self
+
+    def _transform_pandas(self, df: pd.DataFrame) -> pd.DataFrame:
+        # 应用已拟合的转换器
+        transformed_data = self.transformer.transform(df)
+        
+        # 获取转换后的列名
+        new_cols = self.transformer.get_feature_names_out()
+        
+        # 创建新的 DataFrame
+        transformed_df = pd.DataFrame(transformed_data, columns=new_cols, index=df.index)
+        return transformed_df
+
+    def __repr__(self):
+        return (
+            f"{self.__class__.__name__}(numeric_columns={self.numeric_columns!r}, "
+            f"categorical_columns={self.categorical_columns!r})"
+        )
+src/training/model.py
+# src/training/model.py
+import torch
+import torch.nn as nn
+
+class SimpleRecommendationModel(nn.Module):
+    """
+    一个简单的 PyTorch 模型示例。
+    可以根据你的 `model_params.yaml` 文件进行配置。
+    """
+    def __init__(self, input_features: int, config: dict):
+        super(SimpleRecommendationModel, self).__init__()
+        
+        layers = []
+        hidden_layers = config.get("hidden_layers", [128, 64])
+        dropout_rate = config.get("dropout", 0.3)
+        
+        # 输入层
+        layers.append(nn.Linear(input_features, hidden_layers[0]))
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout_rate))
+        
+        # 隐藏层
+        for i in range(len(hidden_layers) - 1):
+            layers.append(nn.Linear(hidden_layers[i], hidden_layers[i+1]))
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout_rate))
+            
+        # 输出层 (例如，二分类问题)
+        layers.append(nn.Linear(hidden_layers[-1], 1))
+        
+        self.model = nn.Sequential(*layers)
+
+    def forward(self, x):
+        return self.model(x)
+src/training/train.py
+# src/training/train.py
+# 这是 Ray 训练作业的核心入口，将被 Prefect 任务调用。
+import os
+import yaml
+from typing import Dict
+
+import torch
+import mlflow
+import pandas as pd
+
+import ray
+from ray.air import session
+from ray.air.config import ScalingConfig
+from ray.train.torch import TorchTrainer, TorchCheckpoint
+
+from src.training.model import SimpleRecommendationModel
+from src.training.preprocess import CustomPreprocessor
+
+def train_loop_per_worker(config: Dict):
+    """
+    在每个 Ray Worker 上执行的训练循环。
+    """
+    # 从配置中获取参数
+    lr = config["lr"]
+    epochs = config["epochs"]
+    batch_size = config["batch_size"]
+    
+    # 获取由 Ray Data 准备好的分布式数据集分片
+    train_ds = session.get_dataset_shard("train")
+    val_ds = session.get_dataset_shard("validation")
+
+    # 实例化模型
+    # 注意：输入特征维度需要在上游确定好并传入
+    model = SimpleRecommendationModel(
+        input_features=config["input_features"],
+        config=config["model_architecture"]
+    )
+    model = ray.train.torch.prepare_model(model)
+
+    criterion = torch.nn.BCEWithLogitsLoss()
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+
+    # 训练循环
+    for epoch in range(epochs):
+        # 训练
+        model.train()
+        for batch in train_ds.iter_torch_batches(batch_size=batch_size, dtypes=torch.float32):
+            # 假设批次是一个字典，包含 "features" 和 "label"
+            # 这需要你的 Preprocessor 输出这样的结构
+            inputs = batch[[col for col in batch.keys() if col != 'label']]
+            labels = batch["label"].unsqueeze(1)
+
+            optimizer.zero_grad()
+            outputs = model(inputs)
+            loss = criterion(outputs, labels)
+            loss.backward()
+            optimizer.step()
+        
+        # 验证
+        model.eval()
+        val_loss = 0
+        total_samples = 0
+        with torch.no_grad():
+            for batch in val_ds.iter_torch_batches(batch_size=batch_size, dtypes=torch.float32):
+                inputs = batch[[col for col in batch.keys() if col != 'label']]
+                labels = batch["label"].unsqueeze(1)
+                outputs = model(inputs)
+                loss = criterion(outputs, labels)
+                val_loss += loss.item() * len(labels)
+                total_samples += len(labels)
+
+        # 使用 session.report() 将指标报告给 Ray AIR/Tune
+        session.report(
+            {"val_loss": val_loss / total_samples},
+            checkpoint=TorchCheckpoint.from_model(model),
+        )
+
+def run_ray_training(config_path: str, data_table: str, label_column: str) -> Dict:
+    """
+    主函数：配置并启动 Ray Trainer。
+    这是被 Prefect 任务调用的入口点。
+    """
+    # 1. 加载配置
+    with open(f"{config_path}/base.yaml") as f:
+        base_config = yaml.safe_load(f)
+    with open(f"{config_path}/model_params.yaml") as f:
+        model_params = yaml.safe_load(f)
+
+    # 2. 设置 MLflow
+    mlflow.set_tracking_uri(os.getenv("MLFLOW_TRACKING_URI"))
+    mlflow.set_experiment(base_config["mlflow"]["experiment_name"])
+    
+    # 3. 初始化 Ray
+    ray.init(address="auto", ignore_reinit_error=True)
+
+    # 4. 读取数据
+    # TODO: 配置 Hive 连接器
+    # from ray.data.datasource import HiveDatasource
+    # full_ds = ray.data.read_datasource(HiveDatasource(), table=data_table)
+    # 临时使用假数据
+    full_ds = ray.data.from_pandas(pd.DataFrame({
+        "total_orders_7d": [1.0, 2.0, 3.0] * 100,
+        "avg_purchase_value_30d": [10.5, 20.2, 5.8] * 100,
+        "last_seen_platform": ["ios", "android", "web"] * 100,
+        label_column: [0, 1, 0] * 100
+    }))
+    
+    # 5. 定义预处理器并拟合
+    feature_cols = [col for col in full_ds.columns() if col != label_column]
+    numeric_cols = ["total_orders_7d", "avg_purchase_value_30d"]
+    categorical_cols = ["last_seen_platform"]
+    
+    preprocessor = CustomPreprocessor(numeric_columns=numeric_cols, categorical_columns=categorical_cols)
+    
+    # 6. 分割数据集
+    train_ds, val_ds = full_ds.train_test_split(test_size=0.2)
+
+    # 对训练集拟合预处理器
+    preprocessor.fit(train_ds.limit(10000).to_pandas())
+    
+    # 获取转换后的特征数量，用于模型初始化
+    transformed_sample = preprocessor.transform(train_ds.limit(1).to_pandas())
+    input_features_dim = transformed_sample.shape[1]
+
+    # 7. 定义 Ray Trainer
+    # 在 Ray 2.5+，推荐使用 Ray Train Loop + an MLflowLoggerCallback
+    # 这里为了简洁，先展示基本结构
+    trainer = TorchTrainer(
+        train_loop_per_worker=train_loop_per_worker,
+        train_loop_config={
+            "lr": model_params["training_loop"]["lr"],
+            "epochs": model_params["training_loop"]["epochs"],
+            "batch_size": model_params["training_loop"]["batch_size"],
+            "model_architecture": model_params["model_architecture"],
+            "input_features": input_features_dim
+        },
+        scaling_config=ScalingConfig(**model_params["scaling_config"]),
+        datasets={"train": train_ds, "validation": val_ds},
+        preprocessor=preprocessor
+    )
+    
+    # 8. 运行训练
+    # 在 MLflow run 的上下文中执行
+    with mlflow.start_run() as run:
+        result = trainer.fit()
+        mlflow_run_id = run.info.run_id
+        print(f"MLflow Run ID: {mlflow_run_id}")
+        
+    # 9. 返回结果
+    return {
+        "best_checkpoint_path": result.best_checkpoints[0][0].path,
+        "metrics": result.metrics,
+        "mlflow_run_id": mlflow_run_id
+    }
+src/pipelines/ 目录
+src/pipelines/data_pipeline.py
+# src/pipelines/data_pipeline.py
+import os
+from prefect import flow, task
+from prefect.tasks import task_input_hash
+from datetime import timedelta, datetime
+
+@task(retries=3, cache_key_fn=task_input_hash, cache_expiration=timedelta(days=1))
+def run_spark_etl(date_str: str):
+    """
+    一个模拟的 Prefect 任务，用于运行 Spark ETL。
+    在实际项目中，这里会使用 PysparkShellProcessor 或类似工具提交 Spark 作业。
+    """
+    print(f"Submitting Spark ETL job for date: {date_str}...")
+    # TODO: 实现提交 Spark 作业的逻辑
+    # e.g., os.system(f"spark-submit --master openshift ... src/etl/preprocess.py --date {date_str}")
+    print("Spark ETL job completed successfully.")
+    return True
+
+@task(retries=3)
+def run_feast_materialize(is_etl_successful: bool, date_str: str):
+    """
+    运行 `feast materialize` 命令来更新在线商店。
+    """
+    if not is_etl_successful:
+        print("Skipping Feast materialize due to ETL failure.")
+        return
+        
+    print(f"Running `feast materialize-incremental` for date {date_str}...")
+    # 切换到 feature_repo 目录并执行命令
+    # cwd = os.getcwd()
+    # os.chdir("feature_repo")
+    # end_date = datetime.strptime(date_str, "%Y-%m-%d")
+    # start_date = end_date - timedelta(days=1)
+    # command = f"feast materialize-incremental {end_date.isoformat()}"
+    # print(f"Executing: {command}")
+    # os.system(command)
+    # os.chdir(cwd)
+    print("Feast materialize completed.")
+
+@flow(name="Daily Data Processing Flow")
+def data_processing_flow(date: str = datetime.now().strftime("%Y-%m-%d")):
+    """
+    每日数据处理和特征工程的编排流程。
+    """
+    etl_status = run_spark_etl(date_str=date)
+    run_feast_materialize(is_etl_successful=etl_status, date_str=date)
+
+if __name__ == "__main__":
+    data_processing_flow()
+src/pipelines/training_pipeline.py
+# src/pipelines/training_pipeline.py
+from prefect import flow, task
+import mlflow
+import yaml
+from datetime import datetime
+
+from src.training.train import run_ray_training
+
+@task
+def generate_training_dataset(base_config: dict) -> str:
+    """
+    使用 Feast 生成训练数据集。
+    """
+    print("Generating training dataset using Feast point-in-time join...")
+    # TODO: 实现 Feast get_historical_features 的逻辑
+    # from feast import FeatureStore
+    # store = FeatureStore(repo_path="feature_repo")
+    # ...
+    print("Training dataset generated successfully.")
+    # 返回训练数据表的名称，供下游任务使用
+    return base_config["data_paths"]["training_dataset_table"]
+
+@task
+def train_model(config_path: str, data_table: str) -> dict:
+    """
+    封装了 Ray 训练作业的 Prefect 任务。
+    """
+    print(f"Starting Ray training job using data from table: {data_table}...")
+    results = run_ray_training(
+        config_path=config_path, 
+        data_table=data_table, 
+        label_column="is_clicked" # 假设这是一个点击率预测模型
+    )
+    print("Ray training job finished.")
+    return results
+
+@task
+def evaluate_and_register_model(training_results: dict, base_config: dict):
+    """
+    评估新模型，如果更好则注册到 MLflow Registry。
+    """
+    run_id = training_results["mlflow_run_id"]
+    new_model_loss = training_results["metrics"]["val_loss"]
+    model_name = base_config["mlflow"]["registered_model_name"]
+    
+    print(f"New model from run {run_id} has validation loss: {new_model_loss}")
+    
+    client = mlflow.tracking.MlflowClient()
+    
+    # 获取当前生产模型的指标
+    try:
+        current_prod_version = client.get_latest_versions(model_name, stages=["Production"])[0]
+        prod_run = client.get_run(current_prod_version.run_id)
+        # 假设我们总是记录 val_loss
+        prod_loss = prod_run.data.metrics.get("val_loss", float('inf'))
+        print(f"Current production model (version {current_prod_version.version}) has loss: {prod_loss}")
+    except Exception:
+        print("No production model found. Registering new model as first version.")
+        prod_loss = float('inf')
+
+    # 如果新模型更好（loss 更低），则注册并提升
+    if new_model_loss < prod_loss:
+        print("New model is better. Registering and promoting to Production.")
+        model_uri = f"runs:/{run_id}/model"
+        model_version = mlflow.register_model(model_uri, model_name)
+        
+        # 将新版本转换到生产阶段，并归档旧的生产版本
+        client.transition_model_version_stage(
+            name=model_name,
+            version=model_version.version,
+            stage="Production",
+            archive_existing_versions=True
+        )
+        print(f"Model version {model_version.version} has been promoted to Production.")
+    else:
+        print("New model is not better than production version. Not registering.")
+
+
+@flow(name="Model Training and Registration Flow")
+def training_pipeline_flow(config_path: str = "configs"):
+    """
+    完整的模型训练、评估和注册流程 (DAG)。
+    """
+    with open(f"{config_path}/base.yaml") as f:
+        base_config = yaml.safe_load(f)
+        
+    # 任务1：生成数据集
+    training_data_table = generate_training_dataset(base_config)
+    
+    # 任务2：训练模型 (隐式依赖任务1的输出)
+    training_results = train_model(config_path, training_data_table)
+    
+    # 任务3：评估和注册 (隐式依赖任务2的输出)
+    evaluate_and_register_model(training_results, base_config)
+
+if __name__ == "__main__":
+    training_pipeline_flow()

@@ -1,0 +1,34 @@
+# pyproject.toml
+# 使用 Poetry 或其他现代 Python 包管理工具
+# 定义项目的元数据和依赖
+
+[tool.poetry]
+name = "your_model_service"
+version = "0.1.0"
+description = "A standardized MLOps project template for a new model service."
+authors = ["Your Name <you@example.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.9"
+
+# MLOps 核心组件
+prefect = "^2.10"
+mlflow = "^2.3"
+feast = {extras = ["hive"], version = "^0.32.1"} # 根据你的在线/离线库选择 extras
+ray = {extras = ["data", "train", "air"], version = "^2.5"}
+
+# 模型与数据处理
+torch = "^1.13"
+scikit-learn = "^1.2"
+pandas = "^1.5"
+pyarrow = "^11.0"
+xgboost = "^1.7"
+pyspark = "^4.0.1"
+
+# 数据库与连接
+pyhive = {extras = ["hive"], version = "^0.7.0"}
+sqlalchemy = "<2.0" # Feast hive connector 依赖
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"

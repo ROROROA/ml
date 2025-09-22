@@ -1,0 +1,55 @@
+# Prefect Worker 配置
+# 连接到自托管的Prefect服务器
+
+worker:
+  # 配置为连接自托管服务器
+  apiConfig: selfHostedServer
+  
+  # Worker基础配置
+  config:
+    # 工作池名称
+    workPool: "kubernetes-pool"
+    # Worker名称前缀
+    name: "k8s-worker"
+  
+  # 副本数
+  replicaCount: 1
+  
+  # 资源配置
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+  
+  # 自托管服务器API配置
+  selfHostedServerApiConfig:
+    # 指向同一集群内的Prefect服务器
+    apiUrl: "http://prefect-server.prefect.svc.cluster.local:4200/api"
+    
+    # 基础认证配置（如果服务器启用了认证）
+    basicAuth:
+      enabled: false  # 与服务器配置保持一致
+      # existingSecret: worker-auth-secret
+  
+  # 环境变量配置（使用extraEnvVars）
+  extraEnvVars:
+    - name: PREFECT_LOGGING_LEVEL
+      value: "INFO"
+    - name: PREFECT_WORKER_HEARTBEAT_SECONDS
+      value: "30"
+
+# 服务账户配置（Worker需要创建和管理Kubernetes资源）
+serviceAccount:
+  create: true
+  annotations: {}
+
+# RBAC配置 - Worker需要管理Pod、Job等资源
+role:
+  create: true
+  extraPermissions: []
+
+rolebinding:
+  create: true

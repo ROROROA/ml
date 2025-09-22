@@ -1,0 +1,41 @@
+# spark-values.yaml (资源优化版)
+
+# Master 节点的配置
+master:
+  # Web UI 服务的配置
+  service:
+    type: NodePort
+    nodePort: 30080
+
+  # --- 新增：为 Master 设置资源请求和限制 ---
+  resources:
+    requests:
+      memory: "256Mi" # 请求 256MB 内存
+      cpu: "100m"     # 请求 0.1 个 CPU 核心
+    limits:
+      memory: "512Mi" # 最多允许使用 512MB 内存
+      cpu: "500m"     # 最多允许使用 0.5 个 CPU 核心
+
+# Worker 节点的配置
+worker:
+  # --- 修改：将 Worker 数量改为 1 ---
+  replicaCount: 1
+  
+  # --- 新增：为 Worker 设置资源请求和限制 ---
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "500m"
+      
+  # --- 关键部分：挂载我们已有的 PVC (保持不变) ---
+  extraVolumeMounts:
+    - name: data
+      mountPath: /data
+      
+  extraVolumes:
+    - name: data
+      persistentVolumeClaim:
+        claimName: spark-data-pvc

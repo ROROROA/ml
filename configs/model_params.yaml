@@ -1,0 +1,19 @@
+# configs/model_params.yaml
+# 模型超参数，方便调优和实验跟踪
+
+# Ray Trainer 的配置
+scaling_config:
+  num_workers: 4
+  use_gpu: True
+
+# 训练循环中的配置
+training_loop:
+  lr: 0.001
+  epochs: 10
+  batch_size: 256
+
+# 模型架构的配置
+model_architecture:
+  embedding_dim: 16
+  hidden_layers: [128, 64]
+  dropout: 0.3

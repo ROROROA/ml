@@ -1,0 +1,97 @@
+# Prefect 自托管服务器配置
+# 基于官方 Helm Chart 的标准化配置
+
+server:
+  # 基础认证配置（可选，用于简单的安全控制）
+  basicAuth:
+    enabled: false  # 生产环境建议启用
+    # existingSecret: server-auth-secret
+  
+  # 服务器副本数
+  replicaCount: 1
+  
+  # 资源限制
+  resources:
+    requests:
+      memory: "512Mi"
+      cpu: "250m"
+    limits:
+      memory: "1Gi" 
+      cpu: "500m"
+  
+  # 环境变量配置
+  env:
+    # 根据部署偏好配置API URL
+    - name: PREFECT_SERVER_UI_API_URL
+      value: "http://localhost:30200/api"  # 本地开发调试配置
+    # 其他Prefect配置
+    - name: PREFECT_LOGGING_LEVEL
+      value: "INFO
+
+# PostgreSQL 数据库配置（使用Bitnami的PostgreSQL子chart）
+postgresql:
+  enabled: true
+  auth:
+    postgresPassword: "prefect123"
+    database: "prefect"
+    username: "prefect"
+    password: "prefect123"
+  
+  # 持久化存储
+  persistence:
+    enabled: true
+    size: "8Gi"
+    storageClass: ""  # 使用默认存储类
+  
+  # 资源配置
+  resources:
+    requests:
+      memory: "256Mi"
+      cpu: "100m"
+    limits:
+      memory: "512Mi"
+      cpu: "250m"
+
+# 服务配置
+service:
+  type: NodePort
+  port: 4200
+  targetPort: 4200
+  nodePort: 30200
+
+# Ingress配置（可选）
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  # 注释掉hosts和tls配置，使用默认结构
+  # hosts:
+  #   - host: prefect-server.local
+  #     paths:
+  #       - path: /
+  #         pathType: Prefix
+  # tls: []
+
+# 存活性和就绪性探针
+livenessProbe:
+  httpGet:
+    path: /api/health
+    port: 4200
+  initialDelaySeconds: 30
+  periodSeconds: 30
+
+readinessProbe:
+  httpGet:
+    path: /api/health
+    port: 4200
+  initialDelaySeconds: 15
+  periodSeconds: 10
+
+# 节点选择器（可选）
+nodeSelector: {}
+
+# 容忍度（可选）
+tolerations: []
+
+# 亲和性（可选）
+affinity: {}

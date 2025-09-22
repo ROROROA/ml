@@ -1,0 +1,85 @@
+# ===============================================================
+# 1. 你的交互式 Spark + Jupyter Pod
+# ===============================================================
+apiVersion: v1
+kind: Pod
+metadata:
+  name: spark-interactive-shell
+  namespace: default
+  labels:
+    app: spark-interactive-shell
+spec:
+  containers:
+  - name: spark-shell
+    image: "my-spark-jupyter:latest"
+    imagePullPolicy: IfNotPresent
+    # --- 将 command 从 sleep infinity 修改为 jupyter 的启动命令 ---
+    command: ["jupyter", "lab"]
+    args:
+      - "--ip=0.0.0.0"
+      - "--port=8888"
+      - "--no-browser"
+      - "--NotebookApp.token=''"
+      # 有些 notebook 镜像需要这个才能在容器中正常运行
+      - "--allow-root" 
+    ports:
+      - containerPort: 8888
+    volumeMounts:
+      - name: shared-jars-hostpath # 引用下面定义的 volume
+        mountPath: /opt/spark/jars-pv
+  serviceAccountName: spark-operator-spark
+  volumes:
+  - name: shared-jars-hostpath
+    hostPath:
+      # Docker Desktop for Windows 的路径映射
+      path: /run/desktop/mnt/host/c/Users/30630/.ivy2.5.2/jars
+      # 如果目录不存在，就创建它
+      type: DirectoryOrCreate
+
+
+
+
+---
+# ===============================================================
+# 2. Headless Service (供 Executor 查找 Driver)
+# ===============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: spark-interactive-shell
+  namespace: default
+spec:
+  clusterIP: None 
+  selector:
+    app: spark-interactive-shell
+
+---
+# ===============================================================
+# 3. NodePort Service (供你从 Host 访问 Jupyter)
+# ===============================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: jupyter-access-service
+  namespace: default
+spec:
+  # 将类型设置为 NodePort
+  type: NodePort
+  selector:
+    # 同样指向我们的交互式 Pod
+    app: spark-interactive-shell
+  ports:
+    - name: http-jupyter
+      protocol: TCP
+      # Service 内部监听的端口
+      port: 8888
+      # Pod 容器实际暴露的端口
+      targetPort: 8888
+      # 外部在 Node 上暴露的端口，如果不指定，K8s 会自动分配一个
+      nodePort: 30088   
+    # --- 新增内容开始 ---
+    - name: http-spark-ui
+      protocol: TCP
+      port: 4040
+      targetPort: 4040
+      nodePort: 30040  

@@ -1,0 +1,26 @@
+# Feast 0.46 方案1配置文件
+# 使用完整feast chart + kubectl patch修复feature-server
+
+# Redis配置
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 1Gi
+  replica:
+    replicaCount: 2
+    persistence:
+      size: 1Gi
+
+# Feature Server配置（将通过kubectl patch修复）
+feature-server:
+  enabled: true
+  image:
+    repository: feastdev/feature-server
+    tag: "0.46.0"
+  
+# 其他组件
+transformation-service:
+  enabled: false

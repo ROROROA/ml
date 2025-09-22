@@ -1,0 +1,23 @@
+# Feast 0.46 方案2配置文件 - 基础组件
+# 只部署Redis等基础组件，禁用feature-server
+
+# Redis配置
+redis:
+  enabled: true
+  auth:
+    enabled: false
+  master:
+    persistence:
+      size: 1Gi
+  replica:
+    replicaCount: 2
+    persistence:
+      size: 1Gi
+
+# 禁用Feature Server（将独立部署）
+feature-server:
+  enabled: false
+  
+# 其他组件
+transformation-service:
+  enabled: false

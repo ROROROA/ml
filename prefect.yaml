@@ -1,0 +1,70 @@
+# prefect.yaml (完整版 - 不使用本地 Docker Registry)
+#
+# 这个文件是你的所有工作流部署的“单一事实来源”。
+# 当你运行 `prefect deploy` 时，它会读取此文件，并
+# 在 Prefect Server 上创建或更新下面定义的所有部署。
+
+# ----------------------------------------------------
+# 构建 (Build) 配置
+# ----------------------------------------------------
+# 这里定义了如何为你的所有 flow 准备一个统一的、可复现的运行环境。
+# 这个步骤会在 `prefect deploy` 运行时被执行。
+build:
+  # 使用 prefect-docker 库来构建镜像。
+  # 你需要先运行 `pip install prefect-docker`
+  - prefect_docker.deployments.steps.build_docker_image:
+      requires: prefect-docker
+      # 镜像名称，与 deploy.sh 中的 IMAGE_REPO_URL 保持一致
+      image_name: ml-app
+      # 镜像标签，Prefect 会自动填充当前的 git commit hash
+      tag: "{{ git_commit_hash }}"
+      # Dockerfile 的路径，'auto' 会自动在当前目录查找 Dockerfile
+      dockerfile: auto
+      # 关键：明确告诉 Prefect 不要尝试推送镜像，因为我们是纯本地开发
+      push: false
+
+# ----------------------------------------------------
+# 部署 (Deployments) 配置
+# ----------------------------------------------------
+# 在这里列出你希望部署到 Prefect Server 的每一个 flow。
+deployments:
+  - name: "daily-data-pipeline"
+    description: "每日运行的特征工程与物化管道。"
+    entrypoint: src/pipelines/data_pipeline.py:data_pipeline_flow
+    work_pool:
+      name: "kubernetes-pool" # 确保这个名称与你 K8s 中的 Worker 所监听的工作池名称一致
+      # 为 K8s Job 定义的模板变量
+      job_variables:
+        # 告诉 K8s Pod 使用哪个镜像。这里使用了上面 build 步骤中定义的变量
+        image: "{{ build.image_name }}:{{ build.tag }}"
+        # 关键：告诉 K8s 永远不要尝试从远程仓库拉取镜像，必须使用本地已有的
+        image_pull_policy: "Never"
+
+  - name: "model-training-pipeline"
+    description: "用于模型训练、评估和注册的管道。通常手动触发或由性能监控触发。"
+    entrypoint: src/pipelines/training_pipeline.py:training_pipeline_flow
+    work_pool:
+      name: "kubernetes-pool"
+      job_variables:
+        image: "{{ build.image_name }}:{{ build.tag }}"
+        image_pull_policy: "Never"
+
+  - name: "apply-feast-definitions"
+    description: "将 feature_repo/ 中的特征定义应用到 Feast 注册表。"
+    entrypoint: src/pipelines/apply_pipeline.py:apply_pipeline_flow
+    # 这个 flow 通常是手动触发，或者在 CI/CD 流程中通过脚本直接调用 feast apply
+    work_pool:
+      name: "kubernetes-pool"
+      job_variables:
+        image: "{{ build.image_name }}:{{ build.tag }}"
+        image_pull_policy: "Never"
+
+  - name: "promote-pipeline"
+    description: "用于将一个已验证的模型版本提升到'生产'或'Staging'阶段的流程。"
+    # 确保你的 promote_pipeline.py 文件中有一个名为 promote_pipeline_flow 的 @flow
+    entrypoint: src/pipelines/promote_pipeline.py:promote_pipeline_flow
+    work_pool:
+      name: "kubernetes-pool"
+      job_variables:
+        image: "{{ build.image_name }}:{{ build.tag }}"
+        image_pull_policy: "Never"

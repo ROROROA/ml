@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: spark-data-pvc # 名字保持和之前一样
+spec:
+  storageClassName: hostpath
+  accessModes:
+    - ReadWriteMany # <--- 必须和 PV 匹配
+  resources:
+    requests:
+      storage: 1Gi # 必须小于或等于 PV 的容量
