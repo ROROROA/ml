@@ -112,6 +112,12 @@ from prefect import task, get_run_logger
 from prefect_shell import ShellOperation
 
 @task
+def simple_test_task():
+    logger = get_run_logger()
+    logger.info("This is a simple test task. If you see this, the import is OK.")
+    print("Simple test task is running!")
+
+@task
 def materialize_features_to_online_store(target_date: str, feast_repo_path: str = "feature_repo"):
     print("print materialize_features_to_online_store")
     logger = get_run_logger()
@@ -133,12 +139,19 @@ def materialize_features_to_online_store(target_date: str, feast_repo_path: str 
     #     commands=[command],
     #     stream_output=True
     # ).run()
-
 @flow
 def data_pipeline_flow(target_date: Optional[str] = None):
-    target_date_str = target_date or (datetime.now() - timedelta(days=50)).strftime('%Y-%m-%d') 
+    target_date_str = target_date or (datetime.now() - timedelta(days=50)).strftime('%Y-%m-%d')
+    
     processed_task = process_features_for_single_day.submit(target_date_str)
-    materialize_features_to_online_store.submit(target_date=target_date_str, wait_for=[processed_task])
+    
+    # 在崩溃的任务之前，先调用这个简单的测试任务
+    test_task_future = simple_test_task.submit(wait_for=[processed_task])
+    
+    materialize_features_to_online_store.submit(
+        target_date=target_date_str, 
+        wait_for=[test_task_future] # 让它等待测试任务
+    )
 
 @flow
 def backfill_flow(start_date: str, end_date: str, feature_groups: Optional[List[str]] = None):
