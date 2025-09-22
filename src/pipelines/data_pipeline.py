@@ -146,7 +146,8 @@ def data_pipeline_flow(target_date: Optional[str] = None):
     # processed_task = process_features_for_single_day.submit(target_date_str)
     
     # 在崩溃的任务之前，先调用这个简单的测试任务
-    test_task_future = simple_test_task.submit(wait_for=[processed_task])
+    # test_task_future = simple_test_task.submit(wait_for=[processed_task])
+    simple_test_task.submit()
     
     # materialize_features_to_online_store.submit(
     #     target_date=target_date_str, 
