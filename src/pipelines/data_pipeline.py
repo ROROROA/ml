@@ -60,7 +60,7 @@ def process_features_for_single_day(
     # logger = logging.getLogger(__name__)
     logger = get_run_logger()
 
-    logger.info(f"Feature processing executor started for date: {target_date_str}")
+    logger.info(f"Features processing executor started for date: {target_date_str}")
     
     is_external_spark = spark is not None
     if not is_external_spark:
