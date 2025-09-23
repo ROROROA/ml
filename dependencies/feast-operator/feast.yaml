@@ -103,7 +103,7 @@ spec:
   feastProjectDir:
     git:
       url: https://github.com/ROROROA/ml
-      ref: 3bf7691
+      ref: 954763c
   services:
     volumes:
     - name: shared-jars-hostpath
