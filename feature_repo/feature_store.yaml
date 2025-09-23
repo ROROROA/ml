@@ -1,11 +1,42 @@
 project: movielens_recommendations
 provider: local
-
+offline_store:
+    type: spark
+    spark_conf:
+        spark.driver.bindAddress: 0.0.0.0
+        spark.driver.extraClassPath: /opt/spark/jars-pv/*
+        spark.driver.extraJavaOptions: -Dkubernetes.trust.certificates=true
+        spark.driver.host: feast-spark-driver-service.default.svc.cluster.local
+        spark.driver.port: "7077"
+        spark.executor.extraClassPath: /opt/spark/jars-pv/*
+        spark.hadoop.datanucleus.autoCreateSchema: "true"
+        spark.hadoop.datanucleus.autoCreateTables: "true"
+        spark.hadoop.datanucleus.fixedDatastore: "false"
+        spark.hadoop.fs.s3a.access.key: cXFVWCBKY6xlUVjuc8Qk
+        spark.hadoop.fs.s3a.endpoint: http://minio.default.svc.cluster.local:9000
+        spark.hadoop.fs.s3a.path.style.access: "true"
+        spark.hadoop.fs.s3a.secret.key: Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY
+        spark.hadoop.hive.metastore.schema.verification: "false"
+        spark.hadoop.javax.jdo.option.ConnectionDriverName: org.postgresql.Driver
+        spark.hadoop.javax.jdo.option.ConnectionPassword: mlflow_password
+        spark.hadoop.javax.jdo.option.ConnectionURL: jdbc:postgresql://mlflow-postgres-postgresql.default.svc.cluster.local:5432/spark
+        spark.hadoop.javax.jdo.option.ConnectionUserName: mlflow_user
+        spark.kubernetes.authenticate.driver.serviceAccountName: spark-operator-spark
+        spark.kubernetes.container.image: my-spark-jupyter:latest
+        spark.kubernetes.driver.volumes.hostPath.shared-jars.mount.path: /opt/spark/jars-pv
+        spark.kubernetes.driver.volumes.hostPath.shared-jars.options.path: /opt/spark/jars
+        spark.kubernetes.executor.volumes.hostPath.shared-jars.mount.path: /opt/spark/jars-pv
+        spark.kubernetes.executor.volumes.hostPath.shared-jars.options.path: /opt/spark/jars
+        spark.kubernetes.file.upload.path: s3a://spark-warehouse/spark-uploads
+        spark.kubernetes.namespace: default
+        spark.master: k8s://https://kubernetes.default.svc.cluster.local:443
+        spark.sql.catalogImplementation: hive
+        spark.sql.warehouse.dir: s3a://spark-warehouse/
 online_store:
     type: redis
-    connection_string: localhost:6379
+    connection_string: redis.default.svc.cluster.local:6379
 registry:
-    path: postgresql+psycopg://feast:feast@localhost:5433/feast
+    path: postgresql+psycopg://feast:feast@postgres.default.svc.cluster.local:5432/feast
     registry_type: sql
     cache_ttl_seconds: 60
     sqlalchemy_config_kwargs:
