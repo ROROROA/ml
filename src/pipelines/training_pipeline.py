@@ -50,6 +50,12 @@ def generate_training_dataset(
     fs = FeatureStore(repo_path=feature_repo_path)
 
     try:
+        # --- 关键修复：确保目标数据库存在 ---
+        # 在写入任何表之前，先创建 training_datasets 数据库（如果它不存在）。
+        output_db = "training_datasets"
+        spark.sql(f"CREATE DATABASE IF NOT EXISTS {output_db}")
+        logger.info(f"Database '{output_db}' is ready for writing training data.")
+        
         logger.info(f"Loading entity dataframe from source '{training_data_source.name}'...")
         entity_df = training_data_source.get_entity_df(
             spark=spark,
@@ -60,14 +66,12 @@ def generate_training_dataset(
 
         logger.info(f"Assembling training data with features: {feature_list}")
 
-        # --- 关键修复 ---
         # 将 .to_spark() 修改为 .to_spark_df() 以匹配新版 Feast 的 API。
         training_df = fs.get_historical_features(
             entity_df=entity_df,
             features=feature_list,
         ).to_spark_df()
 
-        # --- 新增：验证步骤 ---
         # 在写入数据之前，打印最终生成的训练宽表的前10行，以便调试和验证。
         logger.info("--- [DEBUG] Verifying top 10 rows of the final training DataFrame ---")
         training_df.show(10, truncate=False)
