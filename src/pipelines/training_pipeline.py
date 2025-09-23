@@ -18,6 +18,12 @@ from src.training.train import run_ray_training
 # 假设 SparkSession 已经配置好
 from pyspark.sql import SparkSession
 
+def get_spark_session(appName) -> SparkSession:
+    """获取或创建一个 SparkSession。"""
+    # return SparkSession.builder.appName("FeatureETL-MovieLens").enableHiveSupport().getOrCreate()
+    return SparkSession.builder.appName(appName).remote("sc://spark-connect-external-service:15002").getOrCreate()
+    # return SparkSession.builder.remote("sc://localhost:31002").getOrCreate()
+
 @task
 def generate_training_dataset(
     training_data_source: TrainingDataSource, # 参数化：传入一个数据源对象
@@ -40,7 +46,8 @@ def generate_training_dataset(
     
     logger.info(f"Generating unique training dataset: {output_table_name}")
     
-    spark = SparkSession.builder.appName(f"GenerateTrainingDataset-{unique_run_id}").getOrCreate()
+    spark = get_spark_session(f"GenerateTrainingDataset-{unique_run_id}")
+    # spark = SparkSession.builder.appName(f"GenerateTrainingDataset-{unique_run_id}").getOrCreate()
     fs = FeatureStore(repo_path=feature_repo_path)
 
     # 1. 使用传入的 training_data_source 对象来获取“实体时间戳”
@@ -163,3 +170,20 @@ def training_pipeline_flow(
         evaluation_threshold=evaluation_threshold
     )
 
+
+if __name__ == "__main__":
+    # 为本地测试运行 Flow
+    # 你可以在这里直接调用你的 flow 函数
+    # 就像调用一个普通的 Python 函数一样
+    training_pipeline_flow(
+        data_source_name="movielens_ratings",
+        data_start_date="2019-01-01",
+        data_end_date="2019-01-07", # 为了快速测试，只用7天的数据
+        feature_list=[
+            "user_rolling_features:avg_rating_past_30d",
+            "user_rolling_features:rating_count_past_30d",
+            "movie_static_features:genres"
+        ],
+        model_hyperparameters={"learning_rate": 0.01, "epochs": 1}, # 只训练1个 epoch
+        mlflow_experiment_name="local-test-run"
+    )

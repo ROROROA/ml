@@ -1,4 +1,12 @@
 # feature-store.yaml
+apiVersion: v1
+kind: Secret
+metadata:
+  name: feast-data-stores
+stringData:
+  redis: |
+    my-redis-master.default.svc.cluster.local:6379,password=ZiiTcOq5jT
+---
 apiVersion: feast.dev/v1alpha1
 kind: FeatureStore
 metadata:
@@ -6,17 +14,35 @@ metadata:
   namespace: default
 spec:
   feastProject: feast_demo
+  feastProjectDir:
+    git:
+      url: https://github.com/ROROROA/ml
   services:
+    onlineStore:
+      persistence:
+        store:
+          type: redis
+          secretRef:
+            name: feast-data-stores
+      server:
+        env:
+        - name: AWS_ACCESS_KEY_ID
+          value: pe5SRJXlhRnxqAX6sVnw
+        - name: AWS_SECRET_ACCESS_KEY
+          value: LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63
+        - name: FEAST_S3_ENDPOINT_URL
+          value: http://minio.default.svc.cluster.local:9000
+
     ui: {} # 只需要一个空对象，Operator 就会使用默认值创建 UI Deployment
-    registry:
-      local:
-        persistence:
-          file:
-            path: s3://feast/registry.db
-            s3_additional_kwargs:
-              endpoint_url: "http://minio.default.svc.cluster.local:9000"
-              aws_access_key_id: "pe5SRJXlhRnxqAX6sVnw"
-              aws_secret_access_key: "LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63"
+    # registry:
+    #   local:
+    #     persistence:
+    #       file:
+    #         path: s3://feast/registry.db
+    #         s3_additional_kwargs:
+    #           endpoint_url: "http://minio.default.svc.cluster.local:9000"
+    #           aws_access_key_id: "pe5SRJXlhRnxqAX6sVnw"
+    #           aws_secret_access_key: "LlyFwjVqgMqAaCQhQE0IamvkdLclM6UxvtR5rw63"
 
 
 # set AWS_ACCESS_KEY_ID=pe5SRJXlhRnxqAX6sVnw

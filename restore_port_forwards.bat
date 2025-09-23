@@ -54,7 +54,9 @@ start /B  kubectl port-forward svc/minio-console 9001:9001 -n default
 @REM redis password: ZiiTcOq5jT
 
 
-
+feast
+kubectl port-forward svc/postgres 5433:5432 
+kubectl port-forward svc/feast-example-ui 9876:80 
 
 
 

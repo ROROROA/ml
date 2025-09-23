@@ -1,0 +1,162 @@
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: feast-spark-role
+  namespace: default
+rules:
+- apiGroups: [""]
+  # 在这里添加 'configmaps'
+  resources: ["pods", "services", "persistentvolumeclaims", "configmaps"]
+  verbs: ["get", "list", "watch", "create", "delete", "deletecollection"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: feast-spark-rolebinding
+  namespace: default
+subjects:
+- kind: ServiceAccount
+  name: feast-example 
+  namespace: default
+roleRef:
+  kind: Role
+  name: feast-spark-role #
+  apiGroup: rbac.authorization.k8s.io
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: feast-data-stores
+stringData:
+  redis: |
+    connection_string: redis.default.svc.cluster.local:6379
+  sql: |
+    path: postgresql+psycopg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres.default.svc.cluster.local:5432/${POSTGRES_DB}
+    cache_ttl_seconds: 60
+    sqlalchemy_config_kwargs:
+        echo: false
+        pool_pre_ping: true
+  spark: |
+    spark_conf:        
+      spark.driver.host: "feast-spark-driver-service.default.svc.cluster.local"
+      spark.driver.bindAddress: "0.0.0.0"
+      spark.driver.port: "7077"
+      spark.driver.blockManager.port: "7078" 
+      spark.master: "k8s://https://kubernetes.default.svc.cluster.local:443"
+      spark.kubernetes.container.image: "my-spark-jupyter:latest"
+      spark.kubernetes.authenticate.driver.serviceAccountName: "spark-operator-spark"
+      spark.kubernetes.namespace: "default"
+      spark.kubernetes.file.upload.path: "s3a://spark-warehouse/spark-uploads"
+      spark.driver.extraJavaOptions: "-Dkubernetes.trust.certificates=true"
+      spark.driver.extraClassPath: "/opt/spark/jars-pv/*" 
+      spark.executor.extraClassPath: "/opt/spark/jars-pv/*"
+      spark.kubernetes.driver.volumes.hostPath.shared-jars.mount.path: "/opt/spark/jars-pv"
+      spark.kubernetes.driver.volumes.hostPath.shared-jars.options.path: "/run/desktop/mnt/host/c/Users/30630/.ivy2.5.2/jars"
+      spark.kubernetes.executor.volumes.hostPath.shared-jars.mount.path: "/opt/spark/jars-pv"
+      spark.kubernetes.executor.volumes.hostPath.shared-jars.options.path: "/run/desktop/mnt/host/c/Users/30630/.ivy2.5.2/jars"
+      spark.hadoop.fs.s3a.endpoint: "http://minio.default.svc.cluster.local:9000"
+      spark.hadoop.fs.s3a.access.key: "cXFVWCBKY6xlUVjuc8Qk"
+      spark.hadoop.fs.s3a.secret.key: "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
+      spark.hadoop.fs.s3a.path.style.access: "true"
+      spark.sql.catalogImplementation: "hive"
+      spark.sql.warehouse.dir: "s3a://spark-warehouse/"
+      spark.hadoop.javax.jdo.option.ConnectionDriverName: "org.postgresql.Driver"
+      spark.hadoop.javax.jdo.option.ConnectionURL: "jdbc:postgresql://mlflow-postgres-postgresql.default.svc.cluster.local:5432/spark"
+      spark.hadoop.javax.jdo.option.ConnectionUserName: "mlflow_user"
+      spark.hadoop.javax.jdo.option.ConnectionPassword: "mlflow_password"
+      spark.hadoop.datanucleus.autoCreateSchema: "true"
+      spark.hadoop.datanucleus.autoCreateTables: "true"
+      spark.hadoop.datanucleus.fixedDatastore: "false"
+      spark.hadoop.hive.metastore.schema.verification: "false"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: feast-spark-driver-service
+  namespace: default
+spec:
+  selector:
+    feast.dev/name: example
+  type: NodePort # 或者 ClusterIP，取决于你的需求
+  ports:
+    - protocol: TCP
+      port: 7077
+      targetPort: 7077
+      name: driver-rpc-port
+    - protocol: TCP
+      port: 7078
+      targetPort: 7078 # Spark Block Manager 端口
+      name: block-manager
+    - protocol: TCP
+      port: 4040
+      targetPort: 4040
+      nodePort: 30001
+      name: spark-ui
+
+---
+apiVersion: feast.dev/v1alpha1
+kind: FeatureStore
+metadata:
+  name: example
+spec:
+  feastProject: movielens_recommendations
+  feastProjectDir:
+    git:
+      url: https://github.com/ROROROA/ml
+      ref: 3bf7691
+  services:
+    volumes:
+    - name: shared-jars-hostpath
+      hostPath:
+        # Docker Desktop for Windows 的路径映射
+        path: /run/desktop/mnt/host/c/Users/30630/.ivy2.5.2/jars
+        # 如果目录不存在，就创建它
+        type: DirectoryOrCreate
+    ui: 
+      image: my-feature-server:latest
+      imagePullPolicy: Never
+      envFrom:
+      - secretRef:
+          name: postgres-secret
+      env:
+      - name: MPLCONFIGDIR
+        value: /tmp
+      volumeMounts:
+        - name: shared-jars-hostpath # 引用下面定义的 volume
+          mountPath: /opt/spark/jars-pv
+    
+    offlineStore:
+
+      persistence:
+        store:
+          type: spark
+          secretRef:
+            name: feast-data-stores
+
+    onlineStore:
+
+      persistence:
+        store:
+          type: redis
+          secretRef:
+            name: feast-data-stores
+      server:
+        image: my-feature-server:latest
+        imagePullPolicy: Never
+        envFrom:
+        - secretRef:
+            name: postgres-secret
+        env:
+        - name: MPLCONFIGDIR
+          value: /tmp
+        resources:
+          requests:
+            cpu: 150m
+            memory: 128Mi
+    registry:
+      local:
+        persistence:
+          store:
+            type: sql
+            secretRef:
+              name: feast-data-stores

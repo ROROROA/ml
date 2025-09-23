@@ -5,6 +5,7 @@
 from prefect import flow, task, get_run_logger
 from prefect_shell import ShellOperation
 
+
 @task
 def apply_feast_definitions(feast_repo_path: str = "feature_repo"):
     """

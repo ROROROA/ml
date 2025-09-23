@@ -12,4 +12,11 @@ RUN pip install prefect-shell
 RUN pip install grpcio==1.71.0 
 RUN pip install grpcio-status==1.71.0 
 
+ENV PIP_INDEX_URL=https://pypi.tuna.tsinghua.edu.cn/simple
+ENV PIP_TRUSTED_HOST=pypi.tuna.tsinghua.edu.cn
+
+RUN pip install torch
+
+# docker build . -t my-ml-base-image:latest
+
 
