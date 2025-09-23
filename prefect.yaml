@@ -47,6 +47,17 @@ deployments:
       name: "kubernetes-pool"
       job_variables:
         image: "my-ml-base-image:latest" # <--- 变化点
+    task_runner:
+      type: RayTaskRunner
+      config:
+        address: "ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:10001"
+        init_kwargs:
+          runtime_env:
+            pip:
+              - "pandas==2.3.2"
+              - "feast==0.53.0"
+              - "prefect==3.4.18" 
+              - "mlflow==3.3.2"
 
   - name: "apply-feast-definitions"
     description: "将 feature_repo/ 中的特征定义应用到 Feast 注册表。"

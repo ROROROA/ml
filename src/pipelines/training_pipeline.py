@@ -4,9 +4,16 @@
 """
 from prefect import flow, task, get_run_logger
 from prefect.context import get_run_context
+# --- 关键导入：引入 RayTaskRunner 和 ConcurrentTaskRunner ---
+from prefect_ray.task_runners import RayTaskRunner
+from prefect.task_runners import ConcurrentTaskRunner
+# --- 关键导入：引入 Prefect Variable 用于配置管理 ---
+from prefect.blocks.system import Variable
+
 import os
 from datetime import datetime
 from typing import List, Dict, Optional, Any
+import mlflow
 
 # --- 关键导入：Feast 和我们自定义的数据源 ---
 from feast import FeatureStore
@@ -27,7 +34,13 @@ def get_spark_session(appName: str) -> SparkSession:
     return SparkSession.builder.appName(appName).remote("sc://spark-connect-external-service:15002").getOrCreate()
     # return SparkSession.builder.remote("sc://localhost:31002").getOrCreate()
 
-@task
+# --- 关键修改：为 Spark 任务指定一个非 Ray 的 Task Runner ---
+@task(
+    name="Generate Training Data (Spark)",
+    description="使用 Spark 和 Feast 生成时间点正确的训练数据集。",
+    # 这个任务将在执行它的 Prefect Worker 的本地线程池中运行，而不会被提交到 Ray。
+    task_runner=ConcurrentTaskRunner() 
+)
 def generate_training_dataset(
     flow_run_id: str,
     training_data_source: TrainingDataSource,
@@ -50,12 +63,10 @@ def generate_training_dataset(
     fs = FeatureStore(repo_path=feature_repo_path)
 
     try:
-        # --- 关键修复：确保目标数据库存在 ---
-        # 在写入任何表之前，先创建 training_datasets 数据库（如果它不存在）。
+        # 确保目标数据库存在
         output_db = "training_datasets"
         spark.sql(f"CREATE DATABASE IF NOT EXISTS {output_db}")
-        logger.info(f"Database '{output_db}' is ready for writing training data.")
-        
+
         logger.info(f"Loading entity dataframe from source '{training_data_source.name}'...")
         entity_df = training_data_source.get_entity_df(
             spark=spark,
@@ -66,13 +77,11 @@ def generate_training_dataset(
 
         logger.info(f"Assembling training data with features: {feature_list}")
 
-        # 将 .to_spark() 修改为 .to_spark_df() 以匹配新版 Feast 的 API。
         training_df = fs.get_historical_features(
             entity_df=entity_df,
             features=feature_list,
         ).to_spark_df()
 
-        # 在写入数据之前，打印最终生成的训练宽表的前10行，以便调试和验证。
         logger.info("--- [DEBUG] Verifying top 10 rows of the final training DataFrame ---")
         training_df.show(10, truncate=False)
 
@@ -85,16 +94,21 @@ def generate_training_dataset(
         
     return output_table_name
 
-@task
+# 这个任务没有指定 task_runner，因此它会使用 Flow 级别的默认设置（RayTaskRunner）
+@task(name="Train Model (Ray)")
 def train_model(
     training_data_table: str,
     mlflow_experiment_name: str,
     run_parameters: Dict
 ) -> dict:
-    """
-    调用 Ray 训练脚本，并将所有版本化参数记录到 MLflow。
-    """
     logger = get_run_logger()
+    
+    # --- 关键改进：在任务开始时从 Prefect 加载配置 ---
+    # 这段代码将在 Ray Worker 上执行
+    mlflow_tracking_uri = Variable.get("mlflow_tracking_uri")
+    mlflow.set_tracking_uri(mlflow_tracking_uri)
+    logger.info(f"MLflow tracking URI set to: {mlflow_tracking_uri}")
+
     logger.info(f"Starting model training on Ray using data from {training_data_table}")
     
     results = run_ray_training(
@@ -104,27 +118,65 @@ def train_model(
     )
     return results
 
-@task
-def evaluate_and_register_model(training_results: dict, evaluation_threshold: float):
+@task(name="Evaluate and Register Model")
+def evaluate_and_register_model(
+    training_results: dict, 
+    evaluation_threshold: float,
+    model_name: str
+):
     """
+    【完整版】
     评估模型并决定是否将其注册到生产环境。
     """
     logger = get_run_logger()
+    
+    # --- 关键改进：在任务开始时也加载配置，确保连接一致 ---
+    # 这段代码也将在 Ray Worker 上执行
+    mlflow_tracking_uri = Variable.get("mlflow_tracking_uri")
+    mlflow.set_tracking_uri(mlflow_tracking_uri)
+    logger.info(f"MLflow tracking URI set for evaluation: {mlflow_tracking_uri}")
+    
     val_accuracy = training_results.get("metrics", {}).get("val_accuracy", 0)
     model_uri = training_results.get("model_uri")
+    
+    if not model_uri:
+        logger.error("Model URI not found in training results. Skipping registration.")
+        return
+
+    run_id = model_uri.split('/')[1]
     
     logger.info(f"New model validation accuracy: {val_accuracy:.4f}")
     logger.info(f"Evaluation threshold is: {evaluation_threshold}")
 
     if val_accuracy > evaluation_threshold:
-        logger.info("Model performance meets the criteria. Registering model...")
-        # TODO: 在这里加入与生产模型比较的逻辑, 并调用 MLflow API 来注册模型
+        logger.info(f"Model performance meets the criteria. Registering and promoting model '{model_name}'...")
+        try:
+            client = mlflow.tracking.MlflowClient()
+            client.create_registered_model(model_name, exist_ok=True)
+            model_version = client.create_model_version(
+                name=model_name,
+                source=model_uri,
+                run_id=run_id
+            )
+            client.transition_model_version_stage(
+                name=model_name,
+                version=model_version.version,
+                stage="Production",
+                archive_existing_versions=True
+            )
+            logger.info(f"Successfully promoted model '{model_name}' version {model_version.version} to 'Production'.")
+        except Exception as e:
+            logger.error(f"Failed to register or promote model in MLflow: {e}")
+            raise
     else:
         logger.warning("Model performance did not meet the criteria. Skipping registration.")
 
 
-@flow(name="Versioned Model Training Flow")
+@flow(
+    name="Versioned Model Training Flow (Ray Backend)"
+)
 def training_pipeline_flow(
+    # --- 参数化 ---
     data_source_name: str = "movielens_ratings",
     data_start_date: str = "2019-01-01",
     data_end_date: str = "2019-01-31",
@@ -138,9 +190,6 @@ def training_pipeline_flow(
     evaluation_threshold: float = 0.85,
     mlflow_experiment_name: str = "movielens-recommendation-dev"
 ):
-    """
-    一个完全可参数化、可版本化的模型训练工作流。
-    """
     ctx = get_run_context()
     flow_run_id = ctx.flow_run.id.hex if ctx.flow_run else "local_run_" + datetime.now().strftime("%Y%m%d%H%M%S")
 
@@ -151,6 +200,7 @@ def training_pipeline_flow(
         "feature_list": ", ".join(feature_list),
         "sampling_ratio": sampling_ratio,
         "evaluation_threshold": evaluation_threshold,
+        "mlflow_experiment_name": mlflow_experiment_name,
         **model_hyperparameters
     }
 
@@ -173,6 +223,7 @@ def training_pipeline_flow(
     
     evaluate_and_register_model(
         training_results=training_results,
-        evaluation_threshold=evaluation_threshold
+        evaluation_threshold=evaluation_threshold,
+        model_name=mlflow_experiment_name
     )
 
