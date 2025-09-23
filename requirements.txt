@@ -22,3 +22,6 @@ prefect-github==0.3.1
 
 # 数据库与连接
 sqlalchemy==2.0.43
+
+
+prefect-ray==0.4.5

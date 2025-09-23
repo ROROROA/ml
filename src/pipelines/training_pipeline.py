@@ -7,8 +7,8 @@ from prefect.context import get_run_context
 # --- 关键导入：引入 RayTaskRunner 和 ConcurrentTaskRunner ---
 from prefect_ray.task_runners import RayTaskRunner
 from prefect.task_runners import ConcurrentTaskRunner
-# --- 关键导入：引入 Prefect Variable 用于配置管理 ---
-from prefect.blocks.system import Variable
+# --- 关键修复：修改 Variable 的导入方式 ---
+import prefect.variables
 
 import os
 from datetime import datetime
@@ -103,9 +103,8 @@ def train_model(
 ) -> dict:
     logger = get_run_logger()
     
-    # --- 关键改进：在任务开始时从 Prefect 加载配置 ---
-    # 这段代码将在 Ray Worker 上执行
-    mlflow_tracking_uri = Variable.get("mlflow_tracking_uri")
+    # --- 关键修复：使用新的 prefect.variables API ---
+    mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     logger.info(f"MLflow tracking URI set to: {mlflow_tracking_uri}")
 
@@ -130,9 +129,8 @@ def evaluate_and_register_model(
     """
     logger = get_run_logger()
     
-    # --- 关键改进：在任务开始时也加载配置，确保连接一致 ---
-    # 这段代码也将在 Ray Worker 上执行
-    mlflow_tracking_uri = Variable.get("mlflow_tracking_uri")
+    # --- 关键修复：使用新的 prefect.variables API ---
+    mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     logger.info(f"MLflow tracking URI set for evaluation: {mlflow_tracking_uri}")
     
@@ -173,7 +171,8 @@ def evaluate_and_register_model(
 
 
 @flow(
-    name="Versioned Model Training Flow (Ray Backend)"
+    name="Versioned Model Training Flow (Ray Backend)",
+    task_runner=RayTaskRunner(address="ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:10001")
 )
 def training_pipeline_flow(
     # --- 参数化 ---

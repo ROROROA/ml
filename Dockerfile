@@ -23,6 +23,8 @@ FROM my-ml-base-image:latest
 RUN pip install redis==4.6.0
 RUN pip install psycopg-binary==3.2.10
 RUN pip install psycopg==3.2.10
+RUN pip install prefect-ray==0.4.5
+
 
 # docker build . -t my-ml-base-image:latest
 
