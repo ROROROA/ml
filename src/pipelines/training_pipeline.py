@@ -147,8 +147,9 @@ def model_training_ray_flow(
 
 # --- 主流程定义区 (The Main Entrypoint Flow) ---
 
-@flow(name="End-to-End Training Pipeline")
-def end_to_end_training_pipeline(
+# --- 关键修复：将 Flow 名称改回 Prefect 部署所期望的名称 ---
+@flow(name="Versioned Model Training Flow")
+def training_pipeline_flow(
     # --- 参数化 ---
     data_source_name: str = "movielens_ratings",
     data_start_date: str = "2019-01-01",
