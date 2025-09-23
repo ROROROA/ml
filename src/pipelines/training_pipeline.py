@@ -29,7 +29,7 @@ def get_spark_session(appName: str) -> SparkSession:
 
 @task
 def generate_training_dataset(
-    flow_run_id: str, # <-- 新增：接收来自 Flow 的唯一ID
+    flow_run_id: str,
     training_data_source: TrainingDataSource,
     feature_list: List[str],
     data_start_date: str,
@@ -43,17 +43,13 @@ def generate_training_dataset(
     """
     logger = get_run_logger()
     
-    # --- 关键修复：使用传入的 flow_run_id 来确保表名唯一 ---
     output_table_name = f"training_datasets.run_{flow_run_id}"
+    logger.info(f"Generating unique training dataset: {output_table_name}")
     
-    logger.info(f"Generating unique training dataset v1: {output_table_name}")
-    
-    # --- 关键改进：使用我们新的、集中的函数来获取 Spark Session ---
     spark = get_spark_session(appName=f"GenerateTrainingDataset-{flow_run_id}")
     fs = FeatureStore(repo_path=feature_repo_path)
 
     try:
-        # 1. 调用数据源对象来获取“实体时间戳” DataFrame
         logger.info(f"Loading entity dataframe from source '{training_data_source.name}'...")
         entity_df = training_data_source.get_entity_df(
             spark=spark,
@@ -62,16 +58,18 @@ def generate_training_dataset(
             sampling_ratio=sampling_ratio
         )
 
-        # 2. 使用参数化的特征列表
         logger.info(f"Assembling training data with features: {feature_list}")
 
-        # 3. 调用 get_historical_features 进行智能 Join
         training_df = fs.get_historical_features(
             entity_df=entity_df,
             features=feature_list,
         ).to_spark()
 
-        # 4. 保存唯一的、不可变的训练数据集
+        # --- 新增：验证步骤 ---
+        # 在写入数据之前，打印最终生成的训练宽表的前10行，以便调试和验证。
+        logger.info("--- [DEBUG] Verifying top 10 rows of the final training DataFrame ---")
+        training_df.show(10, truncate=False)
+
         logger.info(f"Saving final training dataset to {output_table_name}")
         training_df.write.mode("overwrite").saveAsTable(output_table_name)
     
@@ -106,7 +104,6 @@ def evaluate_and_register_model(training_results: dict, evaluation_threshold: fl
     评估模型并决定是否将其注册到生产环境。
     """
     logger = get_run_logger()
-    # 假设 'val_accuracy' 是 Ray 训练脚本返回的关键指标
     val_accuracy = training_results.get("metrics", {}).get("val_accuracy", 0)
     model_uri = training_results.get("model_uri")
     
@@ -122,7 +119,6 @@ def evaluate_and_register_model(training_results: dict, evaluation_threshold: fl
 
 @flow(name="Versioned Model Training Flow")
 def training_pipeline_flow(
-    # --- 参数化 ---
     data_source_name: str = "movielens_ratings",
     data_start_date: str = "2019-01-01",
     data_end_date: str = "2019-01-31",
@@ -139,26 +135,23 @@ def training_pipeline_flow(
     """
     一个完全可参数化、可版本化的模型训练工作流。
     """
-    # --- 关键修复：在 Flow 级别获取上下文和唯一ID ---
     ctx = get_run_context()
     flow_run_id = ctx.flow_run.id.hex if ctx.flow_run else "local_run_" + datetime.now().strftime("%Y%m%d%H%M%S")
 
-    # 准备好要记录到 MLflow 的所有参数
     run_params = {
         "data_source_name": data_source_name,
         "data_start_date": data_start_date,
         "data_end_date": data_end_date,
-        "feature_list": ", ".join(feature_list), # MLflow 参数值最好是字符串
+        "feature_list": ", ".join(feature_list),
         "sampling_ratio": sampling_ratio,
         "evaluation_threshold": evaluation_threshold,
-        **model_hyperparameters # 将超参数字典展开
+        **model_hyperparameters
     }
 
-    # 从注册表中查找数据源对象
     training_data_source_obj = DATASOURCE_REGISTRY[data_source_name]
     
     training_data_table = generate_training_dataset(
-        flow_run_id=flow_run_id, # <-- 将唯一ID传递给任务
+        flow_run_id=flow_run_id,
         training_data_source=training_data_source_obj,
         feature_list=feature_list,
         data_start_date=data_start_date,
