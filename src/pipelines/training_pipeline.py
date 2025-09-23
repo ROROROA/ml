@@ -111,7 +111,7 @@ def evaluate_and_register_model(training_results: dict, evaluation_threshold: fl
 @flow(name="Versioned Model Training Flow")
 def training_pipeline_flow(
     # Data parameters
-    data_source_name: str = "historical_interactions", # <--- 参数现在是字符串
+    data_source_name: str = "movielens_ratings", # <--- 参数现在是字符串
     data_start_date: str = "2023-01-01",
     data_end_date: str = "2023-06-30",
     sampling_ratio: Optional[float] = None,

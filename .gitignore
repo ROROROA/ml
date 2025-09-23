@@ -1,0 +1,114 @@
+# ========================
+# Python
+# ========================
+
+# 1. 虚拟环境
+# 永远不要提交你的虚拟环境文件夹
+.venv/
+venv/
+env/
+.env/
+
+# 2. 字节码和编译文件
+# Python 编译后生成的缓存文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# 3. 构建和分发产物
+# 使用 setuptools, poetry, flint 等工具构建包时生成的文件夹
+build/
+dist/
+*.egg-info/
+wheels/
+.eggs/
+
+# 4. Pip 和依赖管理
+pip-log.txt
+pip-delete-this-directory.txt
+# requirements.txt 通常需要提交，但如果是通过 pip-tools 从 .in 文件生成的，可以考虑忽略
+# *.txt
+
+# 5. 测试和代码覆盖率
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+
+# 6. 类型检查 (Mypy, Pyright)
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyre/
+
+# 7. Jupyter Notebook
+# Checkpoints 文件夹
+.ipynb_checkpoints
+
+# ========================
+# IDE 和编辑器配置
+# ========================
+# PyCharm
+.idea/
+
+# VS Code
+.vscode/
+
+# Sublime Text
+*.sublime-project
+*.sublime-workspace
+
+# Vim
+*.swp
+*.swo
+
+# ========================
+# 敏感信息
+# ========================
+# 环境变量文件。应该提交一个 .env.example 作为模板
+.env
+.env.*
+!.env.example
+
+# 本地设置和密钥
+local_settings.py
+secrets.yaml
+*.key
+*.pem
+
+# ========================
+# 操作系统生成的文件
+# ========================
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+.Spotlight-V100
+.Trashes
+
+# Windows
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+$RECYCLE.BIN/
+
+# ========================
+# 日志和数据
+# ========================
+*.log
+*.log.*
+logs/
+
+# 本地数据库文件
+*.db
+*.sqlite
+*.sqlite3
+
+# 大型数据文件通常不应该由 Git 管理，可以考虑使用 Git LFS
+# data/
+# *.csv
+# *.parquet
