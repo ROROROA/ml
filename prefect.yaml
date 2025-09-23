@@ -58,6 +58,7 @@ deployments:
               - "feast==0.53.0"
               - "prefect==3.4.18" 
               - "mlflow==3.3.2"
+              - "prefect-ray==0.4.5"
 
   - name: "apply-feast-definitions"
     description: "将 feature_repo/ 中的特征定义应用到 Feast 注册表。"
