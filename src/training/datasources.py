@@ -23,11 +23,11 @@ class TrainingDataSource:
         从源表加载数据，并进行采样和基本的列重命名。
         子类应该重写这个方法来加入标签生成等逻辑。
         """
+        # --- 关键修复：将 "SELECT col1, col2, *" 改为 "SELECT *" ---
+        # 原始查询会导致返回的 DataFrame 中有重复的列名，从而在下游引发歧义错误。
+        # 使用 "SELECT *" 可以保证每个列只出现一次，解决了这个根本问题。
         query = f"""
-            SELECT
-                {self.entity_col},
-                {self.timestamp_col},
-                *
+            SELECT *
             FROM {self.table_name}
             WHERE to_date(from_unixtime({self.timestamp_col})) BETWEEN '{start_date}' AND '{end_date}'
         """
@@ -55,9 +55,11 @@ class MovieLensRatingSource(TrainingDataSource):
             when(col("rating") > 3.5, 1).otherwise(0)
         ).select(
             col(self.entity_col).alias("user_id"),
-            col(self.timestamp_col).alias("timestamp"),
+            # 将列的别名从 "timestamp" 修改为 "event_timestamp" 以满足 Feast 的要求。
+            col(self.timestamp_col).alias("event_timestamp"),
             "is_liked",
-            col("movieId").alias("movie_id") # 将 movieId 也包含进来
+            # 确保输出的列名为 "movieId"，与 feature_repo/entities.py 中的定义一致。
+            col("movieId")
         )
         return final_df
 

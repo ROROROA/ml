@@ -46,7 +46,7 @@ def generate_training_dataset(
     # --- 关键修复：使用传入的 flow_run_id 来确保表名唯一 ---
     output_table_name = f"training_datasets.run_{flow_run_id}"
     
-    logger.info(f"Generating unique training dataset: {output_table_name}")
+    logger.info(f"Generating unique training dataset v1: {output_table_name}")
     
     # --- 关键改进：使用我们新的、集中的函数来获取 Spark Session ---
     spark = get_spark_session(appName=f"GenerateTrainingDataset-{flow_run_id}")

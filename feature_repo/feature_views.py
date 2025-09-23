@@ -12,7 +12,7 @@ from feast.infra.offline_stores.contrib.spark_offline_store.spark_source import 
 
 
 user_entity = Entity(name="user_id", description="The user entity for MovieLens")
-movie_entity = Entity(name="movie_id", description="The movie entity for MovieLens")
+movie_entity = Entity(name="movieId", description="The movie entity for MovieLens")
 
 # --- 2. 定义特征视图 ---
 
@@ -62,7 +62,7 @@ user_rolling_features_view = FeatureView(
 # 特征视图 B: 电影的静态特征
 # 这个视图的数据源直接来自原始的 movies 表，因为电影的类型通常不会改变。
 movie_static_features_source = SparkSource(
-    path="raw_data.movielens_movies", # 直接指向原始的 movies 表
+    table="raw_data.movielens_movies", # 直接指向原始的 movies 表
     timestamp_field="created_timestamp", # 假设有一个电影条目创建时间戳
     description="A table containing static movie metadata.",
 )
