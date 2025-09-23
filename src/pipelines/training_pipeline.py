@@ -64,7 +64,7 @@ def generate_training_dataset(
             features=feature_list,
         ).to_spark_df()
         logger.info("--- [DEBUG] Verifying top 10 rows of the final training DataFrame ---")
-        training_df.show(10, truncate=False)
+        # training_df.show(10, truncate=False) # 按照要求删除此行
         logger.info(f"Saving final training dataset to {output_table_name}")
         training_df.write.mode("overwrite").saveAsTable(output_table_name)
     finally:
@@ -255,15 +255,17 @@ def training_pipeline_flow(
         **model_hyperparameters
     }
     
+    # --- 关键修改：为了测试方便，暂时注释掉数据生成步骤，并使用一个已存在的表 ---
     # 步骤 1: 运行数据生成子流程
-    training_data_table = generate_training_data_flow(
-        flow_run_id=flow_run_id,
-        data_source_name=data_source_name,
-        feature_list=feature_list,
-        data_start_date=data_start_date,
-        data_end_date=data_end_date,
-        sampling_ratio=sampling_ratio
-    )
+    # training_data_table = generate_training_data_flow(
+    #     flow_run_id=flow_run_id,
+    #     data_source_name=data_source_name,
+    #     feature_list=feature_list,
+    #     data_start_date=data_start_date,
+    #     data_end_date=data_end_date,
+    #     sampling_ratio=sampling_ratio
+    # )
+    training_data_table = "training_datasets.run_ac28bd262d1548c7a93203cd06cb96e8"
     
     # 步骤 2: 运行模型训练子流程，并传入上一步的结果
     model_training_ray_flow(
