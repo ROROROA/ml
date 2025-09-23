@@ -60,10 +60,12 @@ def generate_training_dataset(
 
         logger.info(f"Assembling training data with features: {feature_list}")
 
+        # --- 关键修复 ---
+        # 将 .to_spark() 修改为 .to_spark_df() 以匹配新版 Feast 的 API。
         training_df = fs.get_historical_features(
             entity_df=entity_df,
             features=feature_list,
-        ).to_spark()
+        ).to_spark_df()
 
         # --- 新增：验证步骤 ---
         # 在写入数据之前，打印最终生成的训练宽表的前10行，以便调试和验证。
