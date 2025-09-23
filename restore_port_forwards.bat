@@ -29,7 +29,7 @@ start /B kubectl port-forward svc/feast-feast-demo-online 8888:80 -n default
 timeout /t 2 /nobreak > nul
 
 echo 4️⃣ 启动 Ray Dashboard (端口 8266)...
-start /B kubectl port-forward svc/ray-kuberay-cluster-head-svc 8266:8265 -n default
+start /B kubectl port-forward svc/ray-kuberay-cluster-head-svc 8265:8265 -n default
 
 timeout /t 3 /nobreak > nul
 
