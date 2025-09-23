@@ -2,7 +2,7 @@
 本模块为 MovieLens 数据集声明式地定义训练数据源 (Training Data Sources)。
 """
 from pyspark.sql import SparkSession, DataFrame
-from pyspark.sql.functions import col, when
+from pyspark.sql.functions import col, when, from_unixtime
 
 class TrainingDataSource:
     """一个用于定义和加载训练“骨架”(Spine)的基类。"""
@@ -55,8 +55,10 @@ class MovieLensRatingSource(TrainingDataSource):
             when(col("rating") > 3.5, 1).otherwise(0)
         ).select(
             col(self.entity_col).alias("user_id"),
-            # 将列的别名从 "timestamp" 修改为 "event_timestamp" 以满足 Feast 的要求。
-            col(self.timestamp_col).alias("event_timestamp"),
+            # --- 关键修复 ---
+            # 使用 from_unixtime() 将 Long 型的 Unix 时间戳转换为标准的 Timestamp 类型，
+            # 以满足 Feast 对时间戳格式的要求。
+            from_unixtime(col(self.timestamp_col)).alias("event_timestamp"),
             "is_liked",
             # 确保输出的列名为 "movieId"，与 feature_repo/entities.py 中的定义一致。
             col("movieId")
