@@ -138,10 +138,6 @@ def run_ray_training(
     ray.init(
         address=RAY_CLUSTER_ADDRESS,
         ignore_reinit_error=True,
-        runtime_env={
-            "working_dir": project_root,
-            # 不在运行时安装大型依赖，避免 raylet 异常
-        },
     )
 
     try:
