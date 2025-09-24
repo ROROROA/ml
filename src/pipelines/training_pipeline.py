@@ -205,6 +205,9 @@ def training_pipeline_flow(
         feature_list=feature_list, data_start_date=data_start_date,
         data_end_date=data_end_date, sampling_ratio=sampling_ratio
     )
+    logger = get_run_logger()
+    logger.info(f"Generated training data table: {training_data_table}")
+
     
     # 步骤 2: 运行模型训练子流程
     model_training_flow(
