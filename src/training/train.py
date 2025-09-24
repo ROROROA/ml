@@ -111,6 +111,7 @@ def log_on_worker(message: str):
     return True
 
 
+
 def run_ray_training(
     training_data_table: str,
     mlflow_experiment_name: str,
@@ -118,17 +119,12 @@ def run_ray_training(
 ) -> Dict:
     """
     一个完整的 Ray 训练作业的入口函数。
-    【关键修改】此函数现在负责连接和断开 Ray 集群。
+    此函数现在负责连接和断开 Ray 集群。
     """
     logger = get_run_logger()
     logger.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
+    # 在函数开始时连接 Ray
     ray.init(address=RAY_CLUSTER_ADDRESS, ignore_reinit_error=True)
-
-    log_task_ref = log_on_worker.remote(f"Step 1: Preparing to read Parquet data from worker. table: {training_data_table}")
-        # 2. ray.get() 会等待任务完成，确保日志已被打印
-    ray.get(log_task_ref)
-
-    logger.info(f"Finish remote logging")
 
     try:
         # --- 1. 设置 MLflow ---
@@ -138,12 +134,10 @@ def run_ray_training(
             mlflow.log_param("git_commit_hash", get_git_commit_hash())
             mlflow.log_param("training_data_table", training_data_table)
 
+            # --- 2. 加载数据 ---
             db_name, table_name = training_data_table.split(".", 1)
             table_path = f"{db_name}.db/{table_name}/"
-
-            # --- 2. 加载数据 ---
             full_path = os.path.join(HIVE_WAREHOUSE_PATH, table_path)
-
 
             logger.info(f"Reading data from Parquet path: {full_path}")
             S3_ENDPOINT_URL = "http://minio.default.svc.cluster.local:9000"
@@ -153,26 +147,30 @@ def run_ray_training(
                 endpoint_override=S3_ENDPOINT_URL,
                 access_key=S3_ACCESS_KEY,
                 secret_key=S3_SECRET_KEY,
-                scheme="http"  # 如果你的 MinIO Endpoint 是 http 而不是 https，这步很重要
+                scheme="http"
             )
             dataset = ray.data.read_parquet(full_path, filesystem=s3_filesystem)
+            logger.info(f"Successfully created Ray Dataset. Count: {dataset.count()}")
+            
+            # 【关键修改】在这里执行数据集分割
+            # 这一步现在应该可以正常工作，因为我们管理了自己的 Ray 连接
+            logger.info("Splitting dataset into training and validation sets...")
+            train_dataset, validation_dataset = dataset.train_test_split(test_size=0.2, shuffle=True)
+            logger.info("Dataset split complete.")
 
 
             # --- 3. 动态预处理 ---
             all_cols = dataset.columns()
             label_col = "is_liked"
-            # 排除所有非特征列
             feature_cols = [
                 c for c in all_cols if c not in 
                 [label_col, "user_id", "movieId", "event_timestamp", "title"]
             ]
 
             schema = dataset.schema()
+            type_mapping = {name: str(dtype) for name, dtype in zip(schema.names, schema.types)}
 
-            type_mapping = {name: str(type) for name, type in zip(schema.names, schema.types)}
-
-# 2. 使用这个我们自己创建的字典进行安全的查找
-            numerical_cols = [c for c in feature_cols if type_mapping.get(c) in ['float32', 'float64', 'int64', 'int32']]
+            numerical_cols = [c for c in feature_cols if type_mapping.get(c) in ['float', 'double', 'int', 'long']]
             categorical_cols = [c for c in feature_cols if type_mapping.get(c) == 'string']
             
             preprocessors = []
@@ -186,28 +184,23 @@ def run_ray_training(
             # 将所有特征合并到一个 "features" 向量中
             def merge_features(df):
                 import pandas as pd
-                df['features'] = df[feature_cols].values.tolist()
-                return df.drop(columns=feature_cols)
-
-            
-            train_dataset, validation_dataset = dataset.train_test_split(test_size=0.2)
+                # 确保只使用存在的列来合并
+                existing_feature_cols = [c for c in feature_cols if c in df.columns]
+                df['features'] = df[existing_feature_cols].values.tolist()
+                return df
 
             # --- 4. 设置 Ray Trainer ---
+            logger.info("Configuring TorchTrainer...")
             trainer = TorchTrainer(
                 train_loop_per_worker=train_loop_per_worker,
                 scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
                 datasets={
                     "train": train_dataset,
-                    "validation": validation_dataset  # Trainer 会自动使用这个数据集进行评估
+                    "validation": validation_dataset  # 直接将分割好的验证集传进去
                 },
-                dataset_config={
-                    "train": ray.train.DataConfig(
-                        preprocessor=preprocessor,
-                        transform=lambda ds: ds.map_batches(merge_features).map_batches(
-                            lambda batch: {"features": torch.tensor(batch["features"], dtype=torch.float32), "label": torch.tensor(batch[label_col], dtype=torch.float32)}
-                        )
-                    )
-                },
+                # 【关键修改】不再需要在 DataConfig 中进行 transform
+                # 预处理器会自动应用到所有数据集
+                preprocessor=preprocessor, 
                 train_loop_config={
                     "learning_rate": run_parameters.get("learning_rate", 0.01),
                     "epochs": run_parameters.get("epochs", 5),
@@ -216,7 +209,9 @@ def run_ray_training(
             )
             
             # --- 5. 运行训练并获取结果 ---
+            logger.info("Starting trainer.fit()...")
             result = trainer.fit()
+            logger.info("Training finished.")
             best_checkpoint_dict = result.best_checkpoints[0][0].to_dict()
             
             # --- 6. 记录结果到 MLflow ---
@@ -224,14 +219,12 @@ def run_ray_training(
             
             # 恢复模型并记录
             model_state = best_checkpoint_dict['model_state_dict']
-            # 需要重新实例化模型结构以加载状态
-            # 这部分逻辑应该与 train_loop_per_worker 中的模型定义一致
-            first_row = dataset.take(1)[0]
-            # 这里需要一个更健壮的方式来获取 input_size
-            # 暂时用一个估算值
-            temp_preprocessed = preprocessor.fit_transform(dataset.limit(1))
-            input_size = len(temp_preprocessed.schema().names) - len([label_col, "user_id", "movieId", "event_timestamp", "title"])
-
+            
+            # 获取预处理器处理后的输入维度
+            # 这是一个更健壮的方法来获取 input_size
+            processed_schema = result.preprocessor.transform_stats_.get("schema_after_transform")
+            input_size = len(processed_schema.field("features").type.shape)
+            
             model_to_log = nn.Sequential(
                 nn.Linear(input_size, 64), nn.ReLU(),
                 nn.Linear(64, 32), nn.ReLU(),
@@ -244,5 +237,5 @@ def run_ray_training(
             
     finally:
         logger.info("Shutting down Ray connection.")
+        # 确保在函数结束时（无论成功或失败）都断开连接
         ray.shutdown()
-
