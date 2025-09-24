@@ -1,16 +1,15 @@
 # src/training/train.py
 
 import os
-import torch
-import torch.nn as nn
 from typing import Dict, Any, List
 import logging
 import pandas as pd # 确保导入 pandas
 import numpy as np
+import pickle
 
 import ray
 import ray.train
-from ray.train.torch import TorchTrainer
+from ray.train.sklearn import SklearnTrainer
 from ray.air.config import ScalingConfig
 from ray.train import session, Checkpoint 
 
@@ -79,52 +78,25 @@ def train_loop_per_worker(config: Dict):
     X_train, y_train = X[train_idx], y[train_idx]
     X_val, y_val = X[val_idx], y[val_idx]
 
-    input_size = X_train.shape[1]
-    model = nn.Sequential(
-        nn.Linear(input_size, 64), nn.ReLU(),
-        nn.Linear(64, 32), nn.ReLU(),
-        nn.Linear(32, 1), nn.Sigmoid()
-    )
-    model = ray.train.torch.prepare_model(model)
-    criterion = nn.BCELoss()
-    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    # 使用 sklearn 逻辑回归（最简依赖）
+    from sklearn.linear_model import LogisticRegression
+    from sklearn.metrics import log_loss, accuracy_score
 
-    # 转成 tensor
-    X_train_t = torch.from_numpy(X_train)
-    y_train_t = torch.from_numpy(y_train)
-    X_val_t = torch.from_numpy(X_val)
-    y_val_t = torch.from_numpy(y_val)
+    model = LogisticRegression(max_iter=200, n_jobs=1)
 
-    # 迷你批次训练
-    num_samples = X_train_t.shape[0]
+    # 简单轮次：每轮完整拟合一次（LogisticRegression 本身是批优化）
     for epoch in range(epochs):
-        model.train()
-        total_loss = 0.0
-        num_batches = 0
-        for start in range(0, num_samples, batch_size):
-            end = min(start + batch_size, num_samples)
-            inputs = X_train_t[start:end]
-            labels = y_train_t[start:end]
-
-            optimizer.zero_grad()
-            outputs = model(inputs)
-            loss = criterion(outputs, labels)
-            loss.backward()
-            optimizer.step()
-            total_loss += loss.item()
-            num_batches += 1
-
-        # 验证
-        model.eval()
-        with torch.no_grad():
-            outputs = model(X_val_t).squeeze()
-            preds = (outputs > 0.5).float()
-            val_acc = (preds.view(-1, 1) == y_val_t).float().mean().item()
+        model.fit(X_train, y_train.ravel())
+        # 验证指标
+        proba = model.predict_proba(X_val)[:, 1]
+        preds = (proba > 0.5).astype(np.float32)
+        val_acc = accuracy_score(y_val, preds)
+        ll = log_loss(y_val, proba, labels=[0, 1])
 
         session.report(
-            {"loss": total_loss / max(num_batches,1), "val_accuracy": val_acc},
+            {"loss": float(ll), "val_accuracy": float(val_acc)},
             checkpoint=Checkpoint.from_dict(
-                {"epoch": epoch, "model_state_dict": model.state_dict(), "input_size": input_size}
+                {"epoch": epoch, "model_bytes": pickle.dumps(model)}
             ),
         )
 
@@ -171,8 +143,8 @@ def run_ray_training(
             S3_SECRET_KEY = "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
 
             # --- 3. 设置 Ray Trainer（最简：单 worker，不使用 Ray Dataset）---
-            logger.info("Configuring TorchTrainer (single worker, no Ray Dataset)...")
-            trainer = TorchTrainer(
+            logger.info("Configuring SklearnTrainer (single worker, no Ray Dataset)...")
+            trainer = SklearnTrainer(
                 train_loop_per_worker=train_loop_per_worker,
                 scaling_config=ScalingConfig(num_workers=1, use_gpu=False),
                 train_loop_config={
@@ -195,19 +167,11 @@ def run_ray_training(
             best_checkpoint_dict = result.best_checkpoints[0][0].to_dict()
             mlflow.log_metrics({k: v for k, v in result.metrics.items() if isinstance(v, (int, float))})
             
-            model_state = best_checkpoint_dict['model_state_dict']
-            feature_vector_size = best_checkpoint_dict.get('input_size', None)
-            if feature_vector_size is None:
-                logger.warning("input_size missing in checkpoint; inferring from model_state (fallback 100).")
-                feature_vector_size = 100
-            
-            model_to_log = nn.Sequential(
-                nn.Linear(feature_vector_size, 64), nn.ReLU(),
-                nn.Linear(64, 32), nn.ReLU(),
-                nn.Linear(32, 1), nn.Sigmoid()
-            )
-            model_to_log.load_state_dict(model_state)
-            mlflow.pytorch.log_model(model_to_log, "model")
+            # 反序列化 sklearn 模型并记录到 MLflow
+            model_bytes = best_checkpoint_dict['model_bytes']
+            model_obj = pickle.loads(model_bytes)
+            import mlflow.sklearn
+            mlflow.sklearn.log_model(model_obj, "model")
 
             return {"metrics": result.metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
             
