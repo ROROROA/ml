@@ -138,8 +138,11 @@ def run_ray_training(
             mlflow.log_param("git_commit_hash", get_git_commit_hash())
             mlflow.log_param("training_data_table", training_data_table)
 
+            db_name, table_name = training_data_table.split(".", 1)
+            table_path = f"{db_name}.db/{table_name}/"
+
             # --- 2. 加载数据 ---
-            full_path = os.path.join(HIVE_WAREHOUSE_PATH, training_data_table.replace(".", "/") + "/")
+            full_path = os.path.join(HIVE_WAREHOUSE_PATH, table_path)
 
 
             logger.info(f"Reading data from Parquet path: {full_path}")
