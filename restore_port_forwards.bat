@@ -59,7 +59,7 @@ kubectl port-forward svc/postgres 5433:5432
 kubectl port-forward svc/redis 6379:6379 
 kubectl port-forward svc/feast-example-ui 9876:80 
 
-
+claude mcp add --transport http context7 https://mcp.context7.com/mcp --header "CONTEXT7_API_KEY: ctx7sk-d8716eab-9512-4da2-b027-4217cfedeb01"
 
 
 echo.

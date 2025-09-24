@@ -141,9 +141,15 @@ def run_ray_training(
             logger.info(f"Successfully created Ray Dataset. Count: {dataset.count()}")
 
             # 在客户端进行数据分割，避免在Worker内部调用train_test_split导致的AttributeError
-            # 使用train_test_split方法替代split_at_indices以解决Ray 2.49.0版本兼容性问题
+            # 使用take和skip方法手动分割数据集以解决Ray 2.49.0版本兼容性问题
             logger.info("Splitting dataset into training and validation sets...")
-            train_dataset, val_dataset = dataset.train_test_split(test_size=0.2, shuffle=True)
+            shuffled_dataset = dataset.random_shuffle()
+            total_count = shuffled_dataset.count()
+            train_count = int(total_count * 0.8)
+
+            # 使用take和skip方法手动分割数据集
+            train_dataset = shuffled_dataset.take(train_count)
+            val_dataset = shuffled_dataset.skip(train_count)
 
             logger.info(f"Dataset split complete. Train count: {train_dataset.count()}, Validation count: {val_dataset.count()}")
 
