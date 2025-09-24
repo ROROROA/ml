@@ -140,7 +140,17 @@ def run_ray_training(
     """
     logger = get_run_logger()
     logger.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
-    ray.init(address=RAY_CLUSTER_ADDRESS, ignore_reinit_error=True)
+
+    # 将当前项目代码目录下发给 Ray worker，保证能导入相同模块
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+
+    ray.init(
+        address=RAY_CLUSTER_ADDRESS,
+        ignore_reinit_error=True,
+        runtime_env={
+            "working_dir": project_root,
+        },
+    )
 
     try:
         # --- 1. MLflow 设置 ---
