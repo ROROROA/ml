@@ -79,7 +79,7 @@ def train_model(
     logger = get_run_logger()
     # prefect.variables.set("mlflow_tracking_uri", "http://mlflow.default.svc.cluster.local:5000")
     mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
-    mlflow_tracking_uri = "http://mlflow-services.default.svc.cluster.local:5000"
+    mlflow_tracking_uri = "http://mlflow.default.svc.cluster.local:80"
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     logger.info(f"MLflow tracking URI set to: {mlflow_tracking_uri}")
     logger.info(f"Submitting training job to Ray cluster for data: {training_data_table}")
