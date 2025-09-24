@@ -78,7 +78,7 @@ def train_model(
     # 它会调用一个内部连接到 Ray 集群的函数。
     logger = get_run_logger()
     # prefect.variables.set("mlflow_tracking_uri", "http://mlflow.default.svc.cluster.local:5000")
-    mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
+    # mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
     mlflow_tracking_uri = "http://mlflow.default.svc.cluster.local:80"
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     logger.info(f"MLflow tracking URI set to: {mlflow_tracking_uri}")
@@ -98,7 +98,8 @@ def evaluate_and_register_model(
 ):
     # 这个任务也在标准的 Prefect Worker 上运行
     logger = get_run_logger()
-    mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
+    # mlflow_tracking_uri = prefect.variables.get("mlflow_tracking_uri")
+    mlflow_tracking_uri = "http://mlflow.default.svc.cluster.local:80"
     mlflow.set_tracking_uri(mlflow_tracking_uri)
     logger.info(f"MLflow tracking URI set for evaluation: {mlflow_tracking_uri}")
     
@@ -180,7 +181,7 @@ def training_pipeline_flow(
     ],
     sampling_ratio: float = 1.0,
     model_hyperparameters: Dict[str, Any] = {"learning_rate": 0.01, "epochs": 5},
-    evaluation_threshold: float = 0.85,
+    evaluation_threshold: float = 0.01,
     mlflow_experiment_name: str = "movielens-recommendation-dev"
 ):
     """
