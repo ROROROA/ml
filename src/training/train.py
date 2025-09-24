@@ -167,8 +167,12 @@ def run_ray_training(
                 [label_col, "user_id", "movieId", "event_timestamp", "title"]
             ]
 
-            numerical_cols = [c for c in feature_cols if dataset.schema().get(c).name in ['float32', 'float64', 'int64', 'int32']]
-            categorical_cols = [c for c in feature_cols if dataset.schema().get(c).name == 'string']
+            schema = dataset.schema()
+
+            # 使用 schema.field(c).type 来获取列的类型，并转换为字符串进行比较
+            numerical_cols = [c for c in feature_cols if str(schema.field(c).type) in ['float32', 'float64', 'int64', 'int32']]
+            categorical_cols = [c for c in feature_cols if str(schema.field(c).type) == 'string']
+
             
             preprocessors = []
             if numerical_cols:

@@ -25,6 +25,7 @@ RUN pip install psycopg-binary==3.2.10
 RUN pip install psycopg==3.2.10
 RUN pip install prefect-ray==0.4.5
 RUN pip install s3fs==2023.9.2
+RUN pip install pyarrow==21.0.0
 
 
 # docker build . -t my-ml-base-image:latest
