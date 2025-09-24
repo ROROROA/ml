@@ -200,11 +200,14 @@ def training_pipeline_flow(
     }
     
     # 步骤 1: 运行数据生成子流程
-    training_data_table = generate_training_data_flow(
-        flow_run_id=flow_run_id, data_source_name=data_source_name,
-        feature_list=feature_list, data_start_date=data_start_date,
-        data_end_date=data_end_date, sampling_ratio=sampling_ratio
-    )
+    # training_data_table = generate_training_data_flow(
+    #     flow_run_id=flow_run_id, data_source_name=data_source_name,
+    #     feature_list=feature_list, data_start_date=data_start_date,
+    #     data_end_date=data_end_date, sampling_ratio=sampling_ratio
+    # )
+
+    training_data_table = "training_datasets.run_6345bc3dcd364d3789b0bf2e52b32881"
+
     logger = get_run_logger()
     logger.info(f"Generated training data table: {training_data_table}")
 
