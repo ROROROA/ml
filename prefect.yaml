@@ -47,6 +47,11 @@ deployments:
       name: "kubernetes-pool"
       job_variables:
         image: "my-ml-base-image:latest" # <--- 变化点
+        env:
+          # boto3 会自动识别这些变量名
+          AWS_ENDPOINT_URL: "http://minio.default.svc.cluster.local:9000"
+          AWS_ACCESS_KEY_ID: "cXFVWCBKY6xlUVjuc8Qk"
+          AWS_SECRET_ACCESS_KEY: "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
 
 
   - name: "apply-feast-definitions"
