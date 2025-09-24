@@ -28,4 +28,7 @@ RUN pip install prefect-ray==0.4.5
 
 # docker build . -t my-ml-base-image:latest
 
+# GIT_HASH=$(git rev-parse --short HEAD)
+# docker build -t my-ml-base-image:$GIT_HASH .
+# docker push my-ml-base-image:$GIT_HASH
 

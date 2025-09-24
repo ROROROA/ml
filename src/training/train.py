@@ -5,6 +5,7 @@ import os
 import torch
 import torch.nn as nn
 from typing import Dict, Any, List
+import logging
 
 import ray
 import ray.train
@@ -13,13 +14,11 @@ from ray.air.config import ScalingConfig
 from ray.air import session
 
 import mlflow
-from sklearn.model_selection import train_test_split
-from ray.data.preprocessors import StandardScaler, OneHotEncoder
+from ray.data.preprocessors import StandardScaler, OneHotEncoder, Chain
 
 # --- 配置区 ---
-# 在生产环境中，这应该通过环境变量或配置文件来管理
 HIVE_WAREHOUSE_PATH = os.getenv("HIVE_WAREHOUSE_PATH", "s3a://spark-warehouse/")
-
+RAY_CLUSTER_ADDRESS = os.getenv("RAY_CLUSTER_ADDRESS", "ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:10001")
 
 def get_git_commit_hash() -> str:
     """获取当前的 Git Commit 哈希值，用于版本追溯。"""
@@ -37,11 +36,14 @@ def train_loop_per_worker(config: Dict):
     lr = config.get("learning_rate", 0.01)
     epochs = config.get("epochs", 5)
     batch_size = config.get("batch_size", 1024)
-    input_size = config.get("input_size") # 这是动态计算后传入的
-
+    
     # 获取由 Ray Train 分配的、已经预处理过的数据分片
     train_shard = session.get_dataset_shard("train")
     val_shard = session.get_dataset_shard("validation")
+    
+    # 从第一个批次中动态获取特征维度
+    first_batch = next(train_shard.iter_batches(batch_size=1, dtypes=torch.float32))
+    input_size = first_batch["features"].shape[1]
 
     # 定义模型和优化器
     model = nn.Sequential(
@@ -52,22 +54,26 @@ def train_loop_per_worker(config: Dict):
         nn.Linear(32, 1),
         nn.Sigmoid()
     )
-    model = ray.train.torch.prepare_model(model) # Ray Train 必需的封装
+    model = ray.train.torch.prepare_model(model)
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
     # 训练循环
     for epoch in range(epochs):
         model.train()
+        total_loss = 0
+        num_batches = 0
         for batch in train_shard.iter_torch_batches(batch_size=batch_size, dtypes=torch.float32):
             inputs = batch["features"]
-            labels = batch["label"].view(-1, 1) # 确保标签维度正确
+            labels = batch["label"].view(-1, 1)
             
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
             loss.backward()
             optimizer.step()
+            total_loss += loss.item()
+            num_batches += 1
 
         # 验证循环
         model.eval()
@@ -88,99 +94,112 @@ def train_loop_per_worker(config: Dict):
 
         # --- 使用 session.report() 将指标和检查点报告给 Ray Train ---
         session.report(
-            {"loss": loss.item(), "val_accuracy": val_accuracy},
+            {"loss": total_loss / num_batches, "val_accuracy": val_accuracy},
             checkpoint=ray.train.Checkpoint.from_dict(
-                dict(epoch=epoch, model=model.state_dict())
+                dict(epoch=epoch, model_state_dict=model.state_dict())
             ),
         )
 
 def run_ray_training(
-    training_data_table: str, # <-- 关键修复：添加此参数
+    training_data_table: str,
     mlflow_experiment_name: str,
     run_parameters: Dict
 ) -> Dict:
     """
     一个完整的 Ray 训练作业的入口函数。
+    【关键修改】此函数现在负责连接和断开 Ray 集群。
     """
-    # --- 1. 设置 MLflow ---
-    mlflow.set_experiment(mlflow_experiment_name)
-    with mlflow.start_run() as run:
-        mlflow.log_params(run_parameters)
-        mlflow.log_param("git_commit_hash", get_git_commit_hash())
-        mlflow.log_param("training_data_table", training_data_table)
+    logging.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
+    ray.init(address=RAY_CLUSTER_ADDRESS, ignore_reinit_error=True)
 
-        # --- 2. 加载数据 ---
-        # 构造指向 Hive 表底层 Parquet 文件的完整路径
-        # 注意：这里的 .replace(".", ".db/") 是一个常见的约定，请根据你的 Hive 配置调整
-        full_path = os.path.join(HIVE_WAREHOUSE_PATH, training_data_table.replace(".", ".db") + "/")
-        print(f"Reading data from Parquet path: {full_path}")
-        
-        # 为了健壮性，这里应该用 try-except
-        try:
+    try:
+        # --- 1. 设置 MLflow ---
+        mlflow.set_experiment(mlflow_experiment_name)
+        with mlflow.start_run() as run:
+            mlflow.log_params(run_parameters)
+            mlflow.log_param("git_commit_hash", get_git_commit_hash())
+            mlflow.log_param("training_data_table", training_data_table)
+
+            # --- 2. 加载数据 ---
+            full_path = os.path.join(HIVE_WAREHOUSE_PATH, training_data_table.replace(".", "/") + "/")
+            logging.info(f"Reading data from Parquet path: {full_path}")
             dataset = ray.data.read_parquet(full_path)
-        except Exception as e:
-            print(f"Error reading data from {full_path}: {e}")
-            raise
 
-        # --- 3. 动态预处理 ---
-        # 将标签和特征分开
-        all_cols = dataset.columns()
-        feature_cols = [c for c in all_cols if c not in ["is_liked", "user_id", "movieId", "event_timestamp"]]
-        label_col = "is_liked"
+            # --- 3. 动态预处理 ---
+            all_cols = dataset.columns()
+            label_col = "is_liked"
+            # 排除所有非特征列
+            feature_cols = [
+                c for c in all_cols if c not in 
+                [label_col, "user_id", "movieId", "event_timestamp", "title"]
+            ]
 
-        # 自动识别数值和类别特征
-        numerical_cols = [c for c in feature_cols if dataset.schema().get(c).name in ['int64', 'int32', 'float32', 'float64']]
-        categorical_cols = [c for c in feature_cols if c not in numerical_cols]
-        
-        preprocessors = []
-        if numerical_cols:
-            preprocessors.append(StandardScaler(columns=numerical_cols))
-        if categorical_cols:
-            preprocessors.append(OneHotEncoder(columns=categorical_cols))
+            numerical_cols = [c for c in feature_cols if dataset.schema().get(c).name in ['float32', 'float64', 'int64', 'int32']]
+            categorical_cols = [c for c in feature_cols if dataset.schema().get(c).name == 'string']
+            
+            preprocessors = []
+            if numerical_cols:
+                preprocessors.append(StandardScaler(columns=numerical_cols))
+            if categorical_cols:
+                preprocessors.append(OneHotEncoder(columns=categorical_cols))
 
-        if not preprocessors:
-            raise ValueError("No features found to preprocess.")
+            preprocessor = Chain(*preprocessors) if preprocessors else None
+            
+            # 将所有特征合并到一个 "features" 向量中
+            def merge_features(df):
+                import pandas as pd
+                df['features'] = df[feature_cols].values.tolist()
+                return df.drop(columns=feature_cols)
 
-        # 定义一个链式预处理器
-        from ray.data.preprocessors import Chain
-        preprocessor = Chain(*preprocessors)
-        
-        # --- 4. 设置 Ray Trainer ---
-        trainer = TorchTrainer(
-            train_loop_per_worker=train_loop_per_worker,
-            scaling_config=ScalingConfig(num_workers=2, use_gpu=False), # 根据你的集群资源调整
-            datasets={"train": dataset}, # 传入完整数据集
-            dataset_config={
-                "train": ray.train.DataConfig(
-                    # 在这里定义数据分割和预处理
-                    split_at_fraction=0.8, # 80% 训练，20% 验证
-                    preprocessor=preprocessor,
-                    # 将标签和特征列分开
-                    transform=lambda df: df.rename(columns={label_col: "label"}).map_batches(
-                        lambda batch: {"features": torch.stack([torch.tensor(batch[c]) for c in feature_cols], dim=1), "label": torch.tensor(batch["label"])}
+            # --- 4. 设置 Ray Trainer ---
+            trainer = TorchTrainer(
+                train_loop_per_worker=train_loop_per_worker,
+                scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
+                datasets={"train": dataset},
+                dataset_config={
+                    "train": ray.train.DataConfig(
+                        split_at_fraction=0.8,
+                        preprocessor=preprocessor,
+                        transform=lambda ds: ds.map_batches(merge_features).map_batches(
+                            lambda batch: {"features": torch.tensor(batch["features"], dtype=torch.float32), "label": torch.tensor(batch[label_col], dtype=torch.float32)}
+                        )
                     )
-                )
-            },
-            train_loop_config={
-                "learning_rate": run_parameters.get("learning_rate", 0.01),
-                "epochs": run_parameters.get("epochs", 5),
-                "batch_size": run_parameters.get("batch_size", 1024),
-                "input_size": len(feature_cols) # 动态计算输入维度
-            },
-        )
-        
-        # --- 5. 运行训练并获取结果 ---
-        result = trainer.fit()
-        best_checkpoint = result.best_checkpoints[0][0]
-        
-        # --- 6. 记录结果到 MLflow ---
-        metrics_to_log = {k: v for k, v in result.metrics.items() if isinstance(v, (int, float))}
-        mlflow.log_metrics(metrics_to_log)
-        
-        # 记录模型
-        with best_checkpoint.as_directory() as checkpoint_dir:
-            model_path = os.path.join(checkpoint_dir, "model.pt")
-            mlflow.pytorch.log_model(torch.load(model_path), "model")
+                },
+                train_loop_config={
+                    "learning_rate": run_parameters.get("learning_rate", 0.01),
+                    "epochs": run_parameters.get("epochs", 5),
+                    "batch_size": run_parameters.get("batch_size", 1024),
+                },
+            )
+            
+            # --- 5. 运行训练并获取结果 ---
+            result = trainer.fit()
+            best_checkpoint_dict = result.best_checkpoints[0][0].to_dict()
+            
+            # --- 6. 记录结果到 MLflow ---
+            mlflow.log_metrics({k: v for k, v in result.metrics.items() if isinstance(v, (int, float))})
+            
+            # 恢复模型并记录
+            model_state = best_checkpoint_dict['model_state_dict']
+            # 需要重新实例化模型结构以加载状态
+            # 这部分逻辑应该与 train_loop_per_worker 中的模型定义一致
+            first_row = dataset.take(1)[0]
+            # 这里需要一个更健壮的方式来获取 input_size
+            # 暂时用一个估算值
+            temp_preprocessed = preprocessor.fit_transform(dataset.limit(1))
+            input_size = len(temp_preprocessed.schema().names) - len([label_col, "user_id", "movieId", "event_timestamp", "title"])
 
-        return {"metrics": result.metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
+            model_to_log = nn.Sequential(
+                nn.Linear(input_size, 64), nn.ReLU(),
+                nn.Linear(64, 32), nn.ReLU(),
+                nn.Linear(32, 1), nn.Sigmoid()
+            )
+            model_to_log.load_state_dict(model_state)
+            mlflow.pytorch.log_model(model_to_log, "model")
+
+            return {"metrics": result.metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
+            
+    finally:
+        logging.info("Shutting down Ray connection.")
+        ray.shutdown()
 
