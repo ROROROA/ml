@@ -189,14 +189,19 @@ def run_ray_training(
                 df['features'] = df[feature_cols].values.tolist()
                 return df.drop(columns=feature_cols)
 
+            
+            train_dataset, validation_dataset = dataset.train_test_split(test_size=0.2)
+
             # --- 4. 设置 Ray Trainer ---
             trainer = TorchTrainer(
                 train_loop_per_worker=train_loop_per_worker,
                 scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
-                datasets={"train": dataset},
+                datasets={
+                    "train": train_dataset,
+                    "validation": validation_dataset  # Trainer 会自动使用这个数据集进行评估
+                },
                 dataset_config={
                     "train": ray.train.DataConfig(
-                        split_at_fraction=0.8,
                         preprocessor=preprocessor,
                         transform=lambda ds: ds.map_batches(merge_features).map_batches(
                             lambda batch: {"features": torch.tensor(batch["features"], dtype=torch.float32), "label": torch.tensor(batch[label_col], dtype=torch.float32)}
