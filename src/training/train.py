@@ -147,9 +147,8 @@ def run_ray_training(
             total_count = shuffled_dataset.count()
             train_count = int(total_count * 0.8)
 
-            # 使用take和skip方法手动分割数据集
-            train_dataset = shuffled_dataset.take(train_count)
-            val_dataset = shuffled_dataset.skip(train_count)
+            # 使用能够返回 Ray Dataset 的切分方法，避免返回 list 导致的下游错误
+            train_dataset, val_dataset = shuffled_dataset.split_at_indices([train_count])
 
             logger.info(f"Dataset split complete. Train count: {train_dataset.count()}, Validation count: {val_dataset.count()}")
 
