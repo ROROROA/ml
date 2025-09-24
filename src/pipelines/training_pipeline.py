@@ -202,22 +202,24 @@ def model_training_ray_flow(
     evaluation_threshold: float,
     run_parameters: Dict,
 ):
+    logger = get_run_logger()
+    logger.info("Starting Ray training flow...")
     """这个子流程负责模型训练和评估，它的所有任务都将在 Ray 上运行。"""
-    connection_ok = check_ray_connection.submit()
+    # connection_ok = check_ray_connection.submit()
 
-    training_results = train_model.submit(
-        training_data_table=training_data_table, 
-        mlflow_experiment_name=mlflow_experiment_name,
-        run_parameters=run_parameters,
-        wait_for=[connection_ok]
-    )
+    # training_results = train_model.submit(
+    #     training_data_table=training_data_table, 
+    #     mlflow_experiment_name=mlflow_experiment_name,
+    #     run_parameters=run_parameters,
+    #     wait_for=[connection_ok]
+    # )
     
-    evaluate_and_register_model.submit(
-        training_results=training_results,
-        evaluation_threshold=evaluation_threshold,
-        model_name=mlflow_experiment_name,
-        wait_for=[training_results]
-    )
+    # evaluate_and_register_model.submit(
+    #     training_results=training_results,
+    #     evaluation_threshold=evaluation_threshold,
+    #     model_name=mlflow_experiment_name,
+    #     wait_for=[training_results]
+    # )
 
 # --- 主流程定义区 ---
 

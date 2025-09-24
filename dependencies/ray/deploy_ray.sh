@@ -14,7 +14,11 @@ helm install ray bitnami/kuberay \
   --set cluster.worker.resources.limits.memory=512Mi \
   --set cluster.worker.resources.requests.cpu=100m \
   --set cluster.worker.resources.limits.cpu=200m \
-  --set cluster.worker.replicas=1
+  --set cluster.worker.replicas=1 \
+  --set rayImage.registry="" \
+  --set rayImage.repository="my-ray" \
+  --set rayImage.tag="2.49.0-debian-12-r0" \
+  --set global.security.allowInsecureImages=true
 
 echo "等待 Ray 集群启动..."
 sleep 30

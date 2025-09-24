@@ -48,6 +48,7 @@ start /B  kubectl port-forward svc/minio-console 9001:9001 -n default
 @REM kubectl port-forward svc/minio 9000:9000 -n default
 @REM kubectl port-forward svc/mlflow-postgres-postgresql 5432:5432 -n default
 @REM submit_connect_server.bat
+prefect deploy
 
 
 
