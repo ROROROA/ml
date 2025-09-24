@@ -13,7 +13,8 @@
       "Bash(kubectl describe pod:*)",
       "Bash(kubectl get pod:*)",
       "WebSearch",
-      "WebFetch(domain:docs.ray.io)"
+      "WebFetch(domain:docs.ray.io)",
+      "mcp__context7__get-library-docs"
     ],
     "deny": [],
     "ask": []
