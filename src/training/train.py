@@ -166,14 +166,14 @@ def run_ray_training(
                 # 合并所有分类特征到 'features' 中
                 preprocessors.append(OneHotEncoder(columns=categorical_cols))
             
-            # 将所有处理过的特征合并到一个名为 'features' 的向量中
+                                                # 将所有处理过的特征合并到一个名为 'features' 的向量中
             # Concatenator 会取 StandardScaler 和 OneHotEncoder 的输出列并将它们合并
             # 构建包含前缀的列名列表
-scaler_cols = [f"scaler_({c})" for c in numerical_cols]
-onehot_cols = [f"one_hot_encoder({c})" for c in categorical_cols]
-all_feature_cols = scaler_cols + onehot_cols
+            scaler_cols = [f"scaler_({c})" for c in numerical_cols]
+            onehot_cols = [f"one_hot_encoder({c})" for c in categorical_cols]
+            all_feature_cols = scaler_cols + onehot_cols
 
-preprocessor = Chain(*preprocessors, Concatenator(output_column_name="features", include=all_feature_cols))
+            preprocessor = Chain(*preprocessors, Concatenator(output_column_name="features", include=all_feature_cols))
 
             # --- 4. 设置 Ray Trainer ---
             logger.info("Configuring TorchTrainer...")

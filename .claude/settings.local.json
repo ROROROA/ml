@@ -11,7 +11,9 @@
       "Bash(kubectl get secret:*)",
       "Bash(kubectl get pods:*)",
       "Bash(kubectl describe pod:*)",
-      "Bash(kubectl get pod:*)"
+      "Bash(kubectl get pod:*)",
+      "WebSearch",
+      "WebFetch(domain:docs.ray.io)"
     ],
     "deny": [],
     "ask": []
