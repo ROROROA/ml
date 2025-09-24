@@ -169,10 +169,11 @@ def run_ray_training(
 
             schema = dataset.schema()
 
-            # 使用 schema.field(c).type 来获取列的类型，并转换为字符串进行比较
-            numerical_cols = [c for c in feature_cols if str(schema.field(c).type) in ['float32', 'float64', 'int64', 'int32']]
-            categorical_cols = [c for c in feature_cols if str(schema.field(c).type) == 'string']
+            type_mapping = {name: str(type) for name, type in zip(schema.names, schema.types)}
 
+# 2. 使用这个我们自己创建的字典进行安全的查找
+            numerical_cols = [c for c in feature_cols if type_mapping.get(c) in ['float32', 'float64', 'int64', 'int32']]
+            categorical_cols = [c for c in feature_cols if type_mapping.get(c) == 'string']
             
             preprocessors = []
             if numerical_cols:
