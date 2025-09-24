@@ -194,7 +194,7 @@ def generate_training_data_flow(
 
 @flow(
     name="Subflow: Train and Evaluate on Ray",
-    task_runner=RayTaskRunner(address="ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:10001")
+    task_runner=RayTaskRunner(address="ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:6379")
 )
 def model_training_ray_flow(
     training_data_table: str,
