@@ -139,8 +139,20 @@ def run_ray_training(
 
             # --- 2. 加载数据 ---
             full_path = os.path.join(HIVE_WAREHOUSE_PATH, training_data_table.replace(".", "/") + "/")
+
+
             logger.info(f"Reading data from Parquet path: {full_path}")
-            dataset = ray.data.read_parquet(full_path)
+            S3_ENDPOINT_URL = "http://minio.default.svc.cluster.local:9000"
+            S3_ACCESS_KEY = "cXFVWCBKY6xlUVjuc8Qk"
+            S3_SECRET_KEY = "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
+            s3_filesystem = pyarrow.fs.S3FileSystem(
+                endpoint_override=S3_ENDPOINT_URL,
+                access_key=S3_ACCESS_KEY,
+                secret_key=S3_SECRET_KEY,
+                scheme="http"  # 如果你的 MinIO Endpoint 是 http 而不是 https，这步很重要
+            )
+            dataset = ray.data.read_parquet(full_path, filesystem=s3_filesystem)
+
 
             # --- 3. 动态预处理 ---
             all_cols = dataset.columns()
