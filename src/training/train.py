@@ -6,19 +6,18 @@ import torch.nn as nn
 from typing import Dict, Any, List
 import logging
 import pandas as pd # 确保导入 pandas
+import numpy as np
 
 import ray
 import ray.train
 from ray.train.torch import TorchTrainer
 from ray.air.config import ScalingConfig
-from ray.data.preprocessors import Concatenator
-
 from ray.train import session, Checkpoint 
 
 import mlflow
-from ray.data.preprocessors import StandardScaler, OneHotEncoder, Chain
 from prefect import get_run_logger
 import pyarrow.fs
+import pyarrow.dataset as ds
 
 # --- 配置区 (保持不变) ---
 HIVE_WAREHOUSE_PATH = os.getenv("HIVE_WAREHOUSE_PATH", "s3://spark-warehouse/")
@@ -41,17 +40,46 @@ def train_loop_per_worker(config: Dict):
     lr = config.get("learning_rate", 0.01)
     epochs = config.get("epochs", 5)
     batch_size = config.get("batch_size", 1024)
-    
-    # a. 获取已经分割好的训练和验证数据分片
-    train_shard = session.get_dataset_shard("train")
-    val_shard = session.get_dataset_shard("val")
 
-    # b. 移除了在worker内部进行数据分割的代码，避免AttributeError
-    
-    first_batch = next(train_shard.iter_batches(batch_size=1, dtypes=torch.float32))
-    # 【重要】预处理器会把特征合并到 'features' 列
-    input_size = first_batch["features"].shape[1]
+    # 在 worker 内直接从 S3 读取数据，避免 Ray Dataset 计划执行
+    s3_endpoint = config["s3_endpoint"]
+    s3_access_key = config["s3_access_key"]
+    s3_secret_key = config["s3_secret_key"]
+    parquet_path = config["parquet_path"]
 
+    s3_filesystem = pyarrow.fs.S3FileSystem(
+        endpoint_override=s3_endpoint,
+        access_key=s3_access_key,
+        secret_key=s3_secret_key,
+        scheme="http"
+    )
+
+    pa_dataset = ds.dataset(parquet_path, filesystem=s3_filesystem, format="parquet")
+    table = pa_dataset.to_table()
+    df = table.to_pandas()
+
+    # 简化：仅使用数值特征，标签列为 is_liked
+    label_col = "is_liked"
+    drop_cols = {label_col, "user_id", "movieId", "event_timestamp", "title"}
+    numeric_cols = [c for c, dt in zip(table.schema.names, table.schema.types)
+                    if c not in drop_cols and str(dt) in [
+                        'int8','int16','int32','int64','uint8','uint16','uint32','uint64',
+                        'float32','float64','float','double','decimal128(38,0)'
+                    ]]
+
+    df = df[[*numeric_cols, label_col]].dropna()
+    X = df[numeric_cols].astype(np.float32).values
+    y = df[label_col].astype(np.float32).values.reshape(-1, 1)
+
+    # 切分（固定随机种子）
+    rng = np.random.RandomState(42)
+    indices = rng.permutation(len(X))
+    train_end = int(0.8 * len(X))
+    train_idx, val_idx = indices[:train_end], indices[train_end:]
+    X_train, y_train = X[train_idx], y[train_idx]
+    X_val, y_val = X[val_idx], y[val_idx]
+
+    input_size = X_train.shape[1]
     model = nn.Sequential(
         nn.Linear(input_size, 64), nn.ReLU(),
         nn.Linear(64, 32), nn.ReLU(),
@@ -61,14 +89,23 @@ def train_loop_per_worker(config: Dict):
     criterion = nn.BCELoss()
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
 
+    # 转成 tensor
+    X_train_t = torch.from_numpy(X_train)
+    y_train_t = torch.from_numpy(y_train)
+    X_val_t = torch.from_numpy(X_val)
+    y_val_t = torch.from_numpy(y_val)
+
+    # 迷你批次训练
+    num_samples = X_train_t.shape[0]
     for epoch in range(epochs):
         model.train()
-        total_loss = 0
+        total_loss = 0.0
         num_batches = 0
-        for batch in train_shard.iter_torch_batches(batch_size=batch_size, dtypes=torch.float32):
-            inputs = batch["features"]
-            labels = batch["label"].view(-1, 1)
-            
+        for start in range(0, num_samples, batch_size):
+            end = min(start + batch_size, num_samples)
+            inputs = X_train_t[start:end]
+            labels = y_train_t[start:end]
+
             optimizer.zero_grad()
             outputs = model(inputs)
             loss = criterion(outputs, labels)
@@ -77,26 +114,17 @@ def train_loop_per_worker(config: Dict):
             total_loss += loss.item()
             num_batches += 1
 
+        # 验证
         model.eval()
-        total_correct = 0
-        total_samples = 0
         with torch.no_grad():
-            for batch in val_shard.iter_torch_batches(batch_size=batch_size, dtypes=torch.float32):
-                inputs = batch["features"]
-                labels = batch["label"]
-                
-                outputs = model(inputs).squeeze()
-                predictions = (outputs > 0.5).float()
-                
-                total_correct += (predictions == labels).sum().item()
-                total_samples += labels.size(0)
-        
-        val_accuracy = total_correct / total_samples if total_samples > 0 else 0
+            outputs = model(X_val_t).squeeze()
+            preds = (outputs > 0.5).float()
+            val_acc = (preds.view(-1, 1) == y_val_t).float().mean().item()
 
         session.report(
-            {"loss": total_loss / num_batches, "val_accuracy": val_accuracy},
+            {"loss": total_loss / max(num_batches,1), "val_accuracy": val_acc},
             checkpoint=Checkpoint.from_dict(
-                dict(epoch=epoch, model_state_dict=model.state_dict())
+                {"epoch": epoch, "model_state_dict": model.state_dict(), "input_size": input_size}
             ),
         )
 
@@ -122,79 +150,29 @@ def run_ray_training(
             mlflow.log_param("git_commit_hash", get_git_commit_hash())
             mlflow.log_param("training_data_table", training_data_table)
 
-            # --- 2. 加载数据 ---
+            # --- 2. 仅构造路径与访问配置，数据读取放到 worker 内 ---
             db_name, table_name = training_data_table.split(".", 1)
             table_path = f"{db_name}.db/{table_name}/"
             full_path = os.path.join(HIVE_WAREHOUSE_PATH, table_path)
 
-            logger.info(f"Reading data from Parquet path: {full_path}")
+            logger.info(f"Training path (Parquet on S3): {full_path}")
             S3_ENDPOINT_URL = "http://minio.default.svc.cluster.local:9000"
             S3_ACCESS_KEY = "cXFVWCBKY6xlUVjuc8Qk"
             S3_SECRET_KEY = "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
-            s3_filesystem = pyarrow.fs.S3FileSystem(
-                endpoint_override=S3_ENDPOINT_URL,
-                access_key=S3_ACCESS_KEY,
-                secret_key=S3_SECRET_KEY,
-                scheme="http"
-            )
-            dataset = ray.data.read_parquet(full_path, filesystem=s3_filesystem)
-            logger.info(f"Successfully created Ray Dataset. Count: {dataset.count()}")
 
-            # 在客户端进行数据分割，避免在Worker内部调用train_test_split导致的AttributeError
-            # 使用take和skip方法手动分割数据集以解决Ray 2.49.0版本兼容性问题
-            logger.info("Splitting dataset into training and validation sets...")
-            # 在 2.49.0 上先 materialize，避免懒执行导致的内部异常
-            shuffled_dataset = dataset.random_shuffle(seed=42).materialize()
-            total_count = shuffled_dataset.count()
-            train_count = int(total_count * 0.8)
-
-            # 使用 split_at_indices 返回 Ray Dataset
-            train_dataset, val_dataset = shuffled_dataset.split_at_indices([train_count])
-
-            logger.info(f"Dataset split complete. Train count: {train_dataset.count()}, Validation count: {val_dataset.count()}")
-
-            # d. 定义预处理器
-            all_cols = dataset.columns()
-            label_col = "is_liked"
-            feature_cols = [
-                c for c in all_cols if c not in 
-                [label_col, "user_id", "movieId", "event_timestamp", "title"]
-            ]
-            
-            schema = dataset.schema()
-            type_mapping = {name: str(dtype) for name, dtype in zip(schema.names, schema.types)}
-            
-            numerical_cols = [c for c in feature_cols if type_mapping.get(c) in ['float', 'double', 'int', 'long', 'float32', 'float64', 'int64', 'int32']]
-            categorical_cols = [c for c in feature_cols if type_mapping.get(c) == 'string']
-            
-            preprocessors = []
-            if numerical_cols:
-                preprocessors.append(StandardScaler(columns=numerical_cols))
-            if categorical_cols:
-                # 合并所有分类特征到 'features' 中
-                preprocessors.append(OneHotEncoder(columns=categorical_cols))
-            
-                                                # 将所有处理过的特征合并到一个名为 'features' 的向量中
-            # Concatenator 会取 StandardScaler 和 OneHotEncoder 的输出列并将它们合并
-            # 构建包含前缀的列名列表
-            scaler_cols = [f"scaler_({c})" for c in numerical_cols]
-            onehot_cols = [f"one_hot_encoder({c})" for c in categorical_cols]
-            all_feature_cols = scaler_cols + onehot_cols
-
-            preprocessor = Chain(*preprocessors, Concatenator(output_column_name="features", include=all_feature_cols))
-
-            # --- 4. 设置 Ray Trainer ---
-            logger.info("Configuring TorchTrainer...")
+            # --- 3. 设置 Ray Trainer（最简：单 worker，不使用 Ray Dataset）---
+            logger.info("Configuring TorchTrainer (single worker, no Ray Dataset)...")
             trainer = TorchTrainer(
                 train_loop_per_worker=train_loop_per_worker,
-                scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
-                # 传递已经分割好的数据集，避免在worker内部进行分割
-                datasets={"train": train_dataset, "val": val_dataset},
-                preprocessor=preprocessor,
+                scaling_config=ScalingConfig(num_workers=1, use_gpu=False),
                 train_loop_config={
                     "learning_rate": run_parameters.get("learning_rate", 0.01),
                     "epochs": run_parameters.get("epochs", 5),
                     "batch_size": run_parameters.get("batch_size", 1024),
+                    "s3_endpoint": S3_ENDPOINT_URL,
+                    "s3_access_key": S3_ACCESS_KEY,
+                    "s3_secret_key": S3_SECRET_KEY,
+                    "parquet_path": full_path,
                 },
             )
             
@@ -208,21 +186,9 @@ def run_ray_training(
             mlflow.log_metrics({k: v for k, v in result.metrics.items() if isinstance(v, (int, float))})
             
             model_state = best_checkpoint_dict['model_state_dict']
-            
-            # 【关键修改】更健壮地获取输入维度
-            # 从预处理器的统计信息中获取最终 'features' 列的维度
-            # 处理不同Ray版本的统计信息结构差异
-            try:
-                preprocessor_stats = result.preprocessor.stats_
-                if 'concatenator' in preprocessor_stats:
-                    feature_vector_size = preprocessor_stats['concatenator']['output_shapes']['features']
-                else:
-                    # 对于新版本的Ray，直接从第一个批次获取特征维度
-                    train_shard = next(iter(result.datasets["train"].iter_batches(batch_size=1)))
-                    feature_vector_size = train_shard["features"].shape[1]
-            except Exception as e:
-                logger.warning(f"Could not get feature vector size from preprocessor stats: {e}")
-                # 默认值，可以根据实际情况调整
+            feature_vector_size = best_checkpoint_dict.get('input_size', None)
+            if feature_vector_size is None:
+                logger.warning("input_size missing in checkpoint; inferring from model_state (fallback 100).")
                 feature_vector_size = 100
             
             model_to_log = nn.Sequential(
