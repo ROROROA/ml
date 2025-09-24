@@ -6,6 +6,7 @@ import logging
 import pandas as pd # 确保导入 pandas
 import numpy as np
 import pickle
+import tempfile
 
 import ray
 
@@ -28,9 +29,10 @@ def get_git_commit_hash() -> str:
 
 @ray.remote(num_cpus=1)
 def worker_train_task(config: Dict) -> Dict[str, Any]:
-    lr = config.get("learning_rate", 0.01)
-    epochs = config.get("epochs", 5)
-    batch_size = config.get("batch_size", 1024)
+    lr = float(config.get("learning_rate", 0.1))
+    epochs = int(config.get("epochs", 10))
+    batch_size = int(config.get("batch_size", 4096))
+    max_rows = int(config.get("max_rows", 500000))
 
     # 在 worker 内直接从 S3 读取数据，避免 Ray Dataset 计划执行
     s3_endpoint = config["s3_endpoint"]
@@ -48,6 +50,8 @@ def worker_train_task(config: Dict) -> Dict[str, Any]:
     pa_dataset = ds.dataset(parquet_path, filesystem=s3_filesystem, format="parquet")
     table = pa_dataset.to_table()
     df = table.to_pandas()
+    if max_rows > 0 and len(df) > max_rows:
+        df = df.head(max_rows)
 
     # 简化：仅使用数值特征，标签列为 is_liked
     label_col = "is_liked"
@@ -62,6 +66,11 @@ def worker_train_task(config: Dict) -> Dict[str, Any]:
     X = df[numeric_cols].astype(np.float32).values
     y = df[label_col].astype(np.float32).values.reshape(-1, 1)
 
+    # 简单标准化有助于收敛
+    feature_means = X.mean(axis=0, keepdims=True)
+    feature_stds = X.std(axis=0, keepdims=True) + 1e-6
+    X = (X - feature_means) / feature_stds
+
     # 切分（固定随机种子）
     rng = np.random.RandomState(42)
     indices = rng.permutation(len(X))
@@ -70,30 +79,45 @@ def worker_train_task(config: Dict) -> Dict[str, Any]:
     X_train, y_train = X[train_idx], y[train_idx]
     X_val, y_val = X[val_idx], y[val_idx]
 
-    # 使用 XGBoost 分类器（无 torch/无 sklearn 依赖）
-    import xgboost as xgb
-    from sklearn.metrics import log_loss, accuracy_score
+    # 纯 NumPy 逻辑回归（二分类，交叉熵损失）
+    def sigmoid(z: np.ndarray) -> np.ndarray:
+        return 1.0 / (1.0 + np.exp(-z))
 
-    model = xgb.XGBClassifier(
-        n_estimators=200,
-        max_depth=6,
-        learning_rate=float(lr),
-        subsample=0.8,
-        colsample_bytree=0.8,
-        tree_method="hist",
-        n_jobs=1,
-        eval_metric="logloss",
-        verbosity=0,
-    )
+    num_features = X_train.shape[1]
+    weights = np.zeros((num_features, 1), dtype=np.float32)
+    bias = 0.0
 
-    # 为了接口简单，按轮次重复拟合（XGBoost 可通过 n_estimators 控制轮数）
-    model.fit(X_train, y_train.ravel())
-    proba = model.predict_proba(X_val)[:, 1]
-    preds = (proba > 0.5).astype(np.float32)
-    val_acc = float(accuracy_score(y_val, preds))
-    ll = float(log_loss(y_val, proba, labels=[0, 1]))
+    num_samples = X_train.shape[0]
+    for _ in range(epochs):
+        for start in range(0, num_samples, batch_size):
+            end = min(start + batch_size, num_samples)
+            xb = X_train[start:end]
+            yb = y_train[start:end]
+            logits = xb @ weights + bias
+            probs = sigmoid(logits)
+            grad_w = xb.T @ (probs - yb) / (end - start)
+            grad_b = float((probs - yb).mean())
+            weights -= lr * grad_w
+            bias -= lr * grad_b
 
-    return {"metrics": {"loss": ll, "val_accuracy": val_acc}, "model_bytes": pickle.dumps(model)}
+    # 验证
+    val_logits = X_val @ weights + bias
+    val_probs = sigmoid(val_logits).reshape(-1)
+    val_preds = (val_probs > 0.5).astype(np.float32)
+    val_labels = y_val.reshape(-1)
+    val_acc = float((val_preds == val_labels).mean())
+    # 数值稳定 logloss
+    eps = 1e-7
+    ll = float(-(val_labels * np.log(val_probs + eps) + (1 - val_labels) * np.log(1 - val_probs + eps)).mean())
+
+    model_payload = {
+        "weights": weights,
+        "bias": bias,
+        "feature_names": numeric_cols,
+        "feature_means": feature_means,
+        "feature_stds": feature_stds,
+    }
+    return {"metrics": {"loss": ll, "val_accuracy": val_acc}, "model_bytes": pickle.dumps(model_payload)}
 
 # --- run_ray_training (核心修改区) ---
 def run_ray_training(
@@ -116,7 +140,7 @@ def run_ray_training(
         ignore_reinit_error=True,
         runtime_env={
             "working_dir": project_root,
-            "pip": ["xgboost>=1.7,<2.0", "scikit-learn>=1.2,<2"],
+            # 不在运行时安装大型依赖，避免 raylet 异常
         },
     )
 
@@ -153,14 +177,16 @@ def run_ray_training(
             logger.info("Training finished.")
             
             # --- 6. 记录结果到 MLflow ---
-            # 记录结果到 MLflow
+            # 记录结果到 MLflow（指标 + 作为 artifact 的模型权重）
             metrics = result.get("metrics", {})
             mlflow.log_metrics({k: float(v) for k, v in metrics.items() if isinstance(v, (int, float))})
 
-            # 反序列化 XGBoost 模型并记录
-            model_obj = pickle.loads(result["model_bytes"])
-            from mlflow import xgboost as mlflow_xgboost
-            mlflow_xgboost.log_model(model_obj, "model")
+            model_bytes = result["model_bytes"]
+            with tempfile.TemporaryDirectory() as td:
+                model_path = os.path.join(td, "model.pkl")
+                with open(model_path, "wb") as f:
+                    f.write(model_bytes)
+                mlflow.log_artifact(model_path, artifact_path="model")
 
             return {"metrics": metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
             
