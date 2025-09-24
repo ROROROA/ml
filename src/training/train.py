@@ -31,19 +31,18 @@ def get_git_commit_hash() -> str:
 def train_loop_per_worker(config: Dict):
     """
     在每个 Ray Worker 上执行的训练循环。
-    【关键修改】数据分割现在在这里进行。
+    【关键修改】数据分割现在在客户端进行，避免了Worker内部的AttributeError问题。
     """
     # 从配置中获取参数
     lr = config.get("learning_rate", 0.01)
     epochs = config.get("epochs", 5)
     batch_size = config.get("batch_size", 1024)
     
-    # a. 获取分配给这个 worker 的、已经预处理过的数据分片
-    worker_data_shard = session.get_dataset_shard("train")
-    
-    # b. 在 worker 内部对这个分片进行再分割，得到训练和验证集
-    #    这个操作在集群的真实 Worker 中执行，可以避免 Client Bug
-    train_shard, val_shard = worker_data_shard.train_test_split(test_size=0.2, shuffle=True)
+    # a. 获取已经分割好的训练和验证数据分片
+    train_shard = session.get_dataset_shard("train")
+    val_shard = session.get_dataset_shard("val")
+
+    # b. 移除了在worker内部进行数据分割的代码，避免AttributeError
     
     # c. 从第一个批次中动态获取特征维度
     #    预处理器已经将所有特征合并到了 "features" 列
@@ -141,6 +140,11 @@ def run_ray_training(
             dataset = ray.data.read_parquet(full_path, filesystem=s3_filesystem)
             logger.info(f"Successfully created Ray Dataset. Count: {dataset.count()}")
 
+            # 在客户端进行数据分割，避免在Worker内部调用train_test_split导致的AttributeError
+            logger.info("Splitting dataset into training and validation sets...")
+            train_dataset, val_dataset = dataset.train_test_split(test_size=0.2, shuffle=True)
+            logger.info(f"Dataset split complete. Train count: {train_dataset.count()}, Validation count: {val_dataset.count()}")
+
             # d. 定义预处理器
             all_cols = dataset.columns()
             label_col = "is_liked"
@@ -166,8 +170,8 @@ def run_ray_training(
             trainer = TorchTrainer(
                 train_loop_per_worker=train_loop_per_worker,
                 scaling_config=ScalingConfig(num_workers=2, use_gpu=False),
-                # 将整个数据集传进去，分割操作将在 worker 中进行
-                datasets={"train": dataset},
+                # 传递已经分割好的数据集，避免在worker内部进行分割
+                datasets={"train": train_dataset, "val": val_dataset},
                 preprocessor=preprocessor,
                 train_loop_config={
                     "learning_rate": run_parameters.get("learning_rate", 0.01),
