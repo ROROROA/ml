@@ -159,8 +159,8 @@ def run_ray_training(
 
             # 反序列化 XGBoost 模型并记录
             model_obj = pickle.loads(result["model_bytes"])
-            import mlflow.xgboost
-            mlflow.xgboost.log_model(model_obj, "model")
+            from mlflow import xgboost as mlflow_xgboost
+            mlflow_xgboost.log_model(model_obj, "model")
 
             return {"metrics": metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
             
