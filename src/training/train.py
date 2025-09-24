@@ -47,7 +47,12 @@ def worker_train_task(config: Dict) -> Dict[str, Any]:
         scheme="http"
     )
 
-    pa_dataset = ds.dataset(parquet_path, filesystem=s3_filesystem, format="parquet")
+    # PyArrow 期望在提供 filesystem 时，path 为 "bucket/key" 而非带 s3:// 前缀
+    if parquet_path.startswith("s3://"):
+        ds_path = parquet_path[len("s3://"):]
+    else:
+        ds_path = parquet_path
+    pa_dataset = ds.dataset(ds_path, filesystem=s3_filesystem, format="parquet")
     table = pa_dataset.to_table()
     df = table.to_pandas()
     if max_rows > 0 and len(df) > max_rows:
