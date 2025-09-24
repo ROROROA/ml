@@ -17,7 +17,7 @@ import mlflow
 from ray.data.preprocessors import StandardScaler, OneHotEncoder, Chain
 
 # --- 配置区 ---
-HIVE_WAREHOUSE_PATH = os.getenv("HIVE_WAREHOUSE_PATH", "s3a://spark-warehouse/")
+HIVE_WAREHOUSE_PATH = os.getenv("HIVE_WAREHOUSE_PATH", "s3://spark-warehouse/")
 RAY_CLUSTER_ADDRESS = os.getenv("RAY_CLUSTER_ADDRESS", "ray://ray-kuberay-cluster-head-svc.default.svc.cluster.local:10001")
 
 def get_git_commit_hash() -> str:
@@ -100,6 +100,15 @@ def train_loop_per_worker(config: Dict):
             ),
         )
 
+@ray.remote
+def log_on_worker(message: str):
+    """这个函数会在一个 Ray worker 进程中执行。"""
+    # 在 worker 端也需要配置日志
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s - WORKER %(levelname)s - %(message)s')
+    logging.info(message)
+    return True
+
+
 def run_ray_training(
     training_data_table: str,
     mlflow_experiment_name: str,
@@ -109,8 +118,15 @@ def run_ray_training(
     一个完整的 Ray 训练作业的入口函数。
     【关键修改】此函数现在负责连接和断开 Ray 集群。
     """
-    logging.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
+    logger = get_run_logger()
+    logger.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
     ray.init(address=RAY_CLUSTER_ADDRESS, ignore_reinit_error=True)
+
+    log_task_ref = log_on_worker.remote(f"Step 1: Preparing to read Parquet data from worker. Path: {s3_path}")
+        # 2. ray.get() 会等待任务完成，确保日志已被打印
+    ray.get(log_task_ref)
+
+    logger.info(f"Finish remote logging")
 
     try:
         # --- 1. 设置 MLflow ---
@@ -122,7 +138,7 @@ def run_ray_training(
 
             # --- 2. 加载数据 ---
             full_path = os.path.join(HIVE_WAREHOUSE_PATH, training_data_table.replace(".", "/") + "/")
-            logging.info(f"Reading data from Parquet path: {full_path}")
+            logger.info(f"Reading data from Parquet path: {full_path}")
             dataset = ray.data.read_parquet(full_path)
 
             # --- 3. 动态预处理 ---
@@ -200,6 +216,6 @@ def run_ray_training(
             return {"metrics": result.metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
             
     finally:
-        logging.info("Shutting down Ray connection.")
+        logger.info("Shutting down Ray connection.")
         ray.shutdown()
 

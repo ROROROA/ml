@@ -48,6 +48,8 @@ rem 执行 spark-submit 命令
   --conf spark.hadoop.datanucleus.fixedDatastore=false ^
   --conf spark.hadoop.hive.metastore.schema.verification=false ^
   --conf spark.sql.warehouse.dir=s3a://spark-warehouse/ ^
+  --conf spark.driver.memory=600m ^
+  --conf spark.executor.memory=600m ^
   connect_server.py
 
 echo.

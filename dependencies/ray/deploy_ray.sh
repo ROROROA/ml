@@ -9,7 +9,7 @@ helm repo update
 # 安装 KubeRay 操作符
 helm install ray bitnami/kuberay \
   --set cluster.head.resources.requests.memory=512Mi \
-  --set cluster.head.resources.limits.memory=1500Mi \
+  --set cluster.head.resources.limits.memory=2000Mi \
   --set cluster.worker.resources.requests.memory=256Mi \
   --set cluster.worker.resources.limits.memory=512Mi \
   --set cluster.worker.resources.requests.cpu=100m \
