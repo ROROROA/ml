@@ -8,10 +8,6 @@ import numpy as np
 import pickle
 
 import ray
-import ray.train
-from ray.train.sklearn import SklearnTrainer
-from ray.air.config import ScalingConfig
-from ray.train import session, Checkpoint 
 
 import mlflow
 from prefect import get_run_logger
@@ -30,12 +26,8 @@ def get_git_commit_hash() -> str:
     except Exception:
         return "unknown"
 
-# --- train_loop_per_worker (保持不变，但为了完整性在此列出) ---
-def train_loop_per_worker(config: Dict):
-    """
-    在每个 Ray Worker 上执行的训练循环。
-    【关键修改】数据分割现在在客户端进行，避免了Worker内部的AttributeError问题。
-    """
+@ray.remote(num_cpus=1)
+def worker_train_task(config: Dict) -> Dict[str, Any]:
     lr = config.get("learning_rate", 0.01)
     epochs = config.get("epochs", 5)
     batch_size = config.get("batch_size", 1024)
@@ -78,27 +70,30 @@ def train_loop_per_worker(config: Dict):
     X_train, y_train = X[train_idx], y[train_idx]
     X_val, y_val = X[val_idx], y[val_idx]
 
-    # 使用 sklearn 逻辑回归（最简依赖）
-    from sklearn.linear_model import LogisticRegression
+    # 使用 XGBoost 分类器（无 torch/无 sklearn 依赖）
+    import xgboost as xgb
     from sklearn.metrics import log_loss, accuracy_score
 
-    model = LogisticRegression(max_iter=200, n_jobs=1)
+    model = xgb.XGBClassifier(
+        n_estimators=200,
+        max_depth=6,
+        learning_rate=float(lr),
+        subsample=0.8,
+        colsample_bytree=0.8,
+        tree_method="hist",
+        n_jobs=1,
+        eval_metric="logloss",
+        verbosity=0,
+    )
 
-    # 简单轮次：每轮完整拟合一次（LogisticRegression 本身是批优化）
-    for epoch in range(epochs):
-        model.fit(X_train, y_train.ravel())
-        # 验证指标
-        proba = model.predict_proba(X_val)[:, 1]
-        preds = (proba > 0.5).astype(np.float32)
-        val_acc = accuracy_score(y_val, preds)
-        ll = log_loss(y_val, proba, labels=[0, 1])
+    # 为了接口简单，按轮次重复拟合（XGBoost 可通过 n_estimators 控制轮数）
+    model.fit(X_train, y_train.ravel())
+    proba = model.predict_proba(X_val)[:, 1]
+    preds = (proba > 0.5).astype(np.float32)
+    val_acc = float(accuracy_score(y_val, preds))
+    ll = float(log_loss(y_val, proba, labels=[0, 1]))
 
-        session.report(
-            {"loss": float(ll), "val_accuracy": float(val_acc)},
-            checkpoint=Checkpoint.from_dict(
-                {"epoch": epoch, "model_bytes": pickle.dumps(model)}
-            ),
-        )
+    return {"metrics": {"loss": ll, "val_accuracy": val_acc}, "model_bytes": pickle.dumps(model)}
 
 # --- run_ray_training (核心修改区) ---
 def run_ray_training(
@@ -121,7 +116,7 @@ def run_ray_training(
         ignore_reinit_error=True,
         runtime_env={
             "working_dir": project_root,
-            "pip": ["scikit-learn==1.7.2"]
+            "pip": ["xgboost>=1.7,<2.0", "scikit-learn>=1.2,<2"],
         },
     )
 
@@ -143,38 +138,31 @@ def run_ray_training(
             S3_ACCESS_KEY = "cXFVWCBKY6xlUVjuc8Qk"
             S3_SECRET_KEY = "Hx1pYxR6sCHo4NAXqRZ1jlT8Ue6SQk6BqWxz7GKY"
 
-            # --- 3. 设置 Ray Trainer（最简：单 worker，不使用 Ray Dataset）---
-            logger.info("Configuring SklearnTrainer (single worker, no Ray Dataset)...")
-            trainer = SklearnTrainer(
-                train_loop_per_worker=train_loop_per_worker,
-                scaling_config=ScalingConfig(num_workers=1, use_gpu=False),
-                train_loop_config={
-                    "learning_rate": run_parameters.get("learning_rate", 0.01),
-                    "epochs": run_parameters.get("epochs", 5),
-                    "batch_size": run_parameters.get("batch_size", 1024),
-                    "s3_endpoint": S3_ENDPOINT_URL,
-                    "s3_access_key": S3_ACCESS_KEY,
-                    "s3_secret_key": S3_SECRET_KEY,
-                    "parquet_path": full_path,
-                },
-            )
-            
-            # --- 5. 运行训练 ---
-            logger.info("Starting trainer.fit()...")
-            result = trainer.fit()
+            # --- 3. 单 worker 远程任务训练 ---
+            logger.info("Submitting XGBoost single-worker training task...")
+            task_config = {
+                "learning_rate": run_parameters.get("learning_rate", 0.1),
+                "epochs": run_parameters.get("epochs", 1),
+                "batch_size": run_parameters.get("batch_size", 1024),
+                "s3_endpoint": S3_ENDPOINT_URL,
+                "s3_access_key": S3_ACCESS_KEY,
+                "s3_secret_key": S3_SECRET_KEY,
+                "parquet_path": full_path,
+            }
+            result = ray.get(worker_train_task.remote(task_config))
             logger.info("Training finished.")
             
             # --- 6. 记录结果到 MLflow ---
-            best_checkpoint_dict = result.best_checkpoints[0][0].to_dict()
-            mlflow.log_metrics({k: v for k, v in result.metrics.items() if isinstance(v, (int, float))})
-            
-            # 反序列化 sklearn 模型并记录到 MLflow
-            model_bytes = best_checkpoint_dict['model_bytes']
-            model_obj = pickle.loads(model_bytes)
-            import mlflow.sklearn
-            mlflow.sklearn.log_model(model_obj, "model")
+            # 记录结果到 MLflow
+            metrics = result.get("metrics", {})
+            mlflow.log_metrics({k: float(v) for k, v in metrics.items() if isinstance(v, (int, float))})
 
-            return {"metrics": result.metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
+            # 反序列化 XGBoost 模型并记录
+            model_obj = pickle.loads(result["model_bytes"])
+            import mlflow.xgboost
+            mlflow.xgboost.log_model(model_obj, "model")
+
+            return {"metrics": metrics, "model_uri": f"runs:/{run.info.run_id}/model"}
             
     finally:
         logger.info("Shutting down Ray connection.")
