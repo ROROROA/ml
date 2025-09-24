@@ -121,6 +121,7 @@ def run_ray_training(
         ignore_reinit_error=True,
         runtime_env={
             "working_dir": project_root,
+            "pip": ["scikit-learn==1.7.2"]
         },
     )
 
