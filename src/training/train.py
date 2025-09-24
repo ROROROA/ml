@@ -11,7 +11,8 @@ import ray
 import ray.train
 from ray.train.torch import TorchTrainer
 from ray.air.config import ScalingConfig
-from ray.air import session, Checkpoint # 导入 Checkpoint
+
+from ray.train import session, Checkpoint 
 
 import mlflow
 from ray.data.preprocessors import StandardScaler, OneHotEncoder, Chain
