@@ -15,6 +15,7 @@ from ray.air import session
 
 import mlflow
 from ray.data.preprocessors import StandardScaler, OneHotEncoder, Chain
+from prefect import flow, task, get_run_logger
 
 # --- 配置区 ---
 HIVE_WAREHOUSE_PATH = os.getenv("HIVE_WAREHOUSE_PATH", "s3://spark-warehouse/")
