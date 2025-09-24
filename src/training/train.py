@@ -123,7 +123,7 @@ def run_ray_training(
     logger.info(f"Connecting to Ray cluster at: {RAY_CLUSTER_ADDRESS}")
     ray.init(address=RAY_CLUSTER_ADDRESS, ignore_reinit_error=True)
 
-    log_task_ref = log_on_worker.remote(f"Step 1: Preparing to read Parquet data from worker. Path: {s3_path}")
+    log_task_ref = log_on_worker.remote(f"Step 1: Preparing to read Parquet data from worker. table: {training_data_table}")
         # 2. ray.get() 会等待任务完成，确保日志已被打印
     ray.get(log_task_ref)
 
